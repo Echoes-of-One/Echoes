@@ -476,358 +476,9 @@ local function SkinDropdown(widget)
     end
 end
 
--- Determine whether the currently-opening UIDropDownMenu belongs to Echoes.
--- IMPORTANT: DropDownList* frames are global singletons shared by every addon,
--- so we must only apply theming when an Echoes-owned dropdown is open, and
--- restore the default appearance afterwards.
-local function IsEchoesOwnedDropdownFrame(frame)
-    if not frame then return false end
-    if frame._EchoesOwned then return true end
-    if frame.GetParent then
-        local p = frame:GetParent()
-        while p do
-            if p._EchoesOwned then return true end
-            if not p.GetParent then break end
-            p = p:GetParent()
-        end
-    end
-    return false
-end
-
-local function IsEchoesDropdownMenuOpen()
-    local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU") or rawget(_G, "UIDROPDOWNMENU_INIT_MENU")
-    return IsEchoesOwnedDropdownFrame(openMenu)
-end
-
-local function CaptureDropDownListDefaults(listFrame)
-    if not listFrame or listFrame._EchoesDefaults then return end
-
-    local d = {}
-    if listFrame.GetBackdrop then d.backdrop = listFrame:GetBackdrop() end
-    if listFrame.GetBackdropColor then d.backdropColor = { listFrame:GetBackdropColor() } end
-    if listFrame.GetBackdropBorderColor then d.borderColor = { listFrame:GetBackdropBorderColor() } end
-
-    d.regions = {}
-    if listFrame.GetRegions then
-        local regs = { listFrame:GetRegions() }
-        for _, r in ipairs(regs) do
-            if r and r.IsObjectType and r:IsObjectType("Texture") then
-                d.regions[#d.regions + 1] = {
-                    tex = r,
-                    texture = r.GetTexture and r:GetTexture() or nil,
-                    alpha = r.GetAlpha and r:GetAlpha() or nil,
-                    blend = r.GetBlendMode and r:GetBlendMode() or nil,
-                    shown = r.IsShown and r:IsShown() or nil,
-                    v1 = r.GetVertexColor and ({ r:GetVertexColor() }) or nil,
-                }
-            end
-        end
-    end
-
-    d.named = {}
-    local name = listFrame.GetName and listFrame:GetName() or nil
-    if name then
-        for _, suffix in ipairs({ "Backdrop", "MenuBackdrop" }) do
-            local obj = _G[name .. suffix]
-            if obj then
-                d.named[suffix] = {
-                    obj = obj,
-                    shown = obj.IsShown and obj:IsShown() or nil,
-                    texture = obj.GetTexture and obj:GetTexture() or nil,
-                    alpha = obj.GetAlpha and obj:GetAlpha() or nil,
-                    v1 = obj.GetVertexColor and ({ obj:GetVertexColor() }) or nil,
-                }
-            end
-        end
-    end
-
-    d.buttons = {}
-    local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
-    if name then
-        for i = 1, maxButtons do
-            local btn = _G[name .. "Button" .. i]
-            if btn then
-                local entry = { btn = btn }
-
-                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
-                entry.ht = ht
-                if ht then
-                    entry.htTexture = ht.GetTexture and ht:GetTexture() or nil
-                    entry.htAlpha = ht.GetAlpha and ht:GetAlpha() or nil
-                    entry.htV = ht.GetVertexColor and ({ ht:GetVertexColor() }) or nil
-                end
-
-                local text = btn.GetFontString and btn:GetFontString() or btn.normalText
-                entry.text = text
-                if text and text.GetTextColor then
-                    entry.textColor = { text:GetTextColor() }
-                end
-
-                local check = _G[name .. "Button" .. i .. "Check"]
-                entry.check = check
-                if check and check.GetVertexColor then
-                    entry.checkV = { check:GetVertexColor() }
-                end
-
-                local uncheck = _G[name .. "Button" .. i .. "UnCheck"]
-                entry.uncheck = uncheck
-                if uncheck and uncheck.GetVertexColor then
-                    entry.uncheckV = { uncheck:GetVertexColor() }
-                end
-
-                local arrow = _G[name .. "Button" .. i .. "ExpandArrow"]
-                entry.arrow = arrow
-                if arrow and arrow.GetVertexColor then
-                    entry.arrowV = { arrow:GetVertexColor() }
-                end
-
-                d.buttons[i] = entry
-            end
-        end
-    end
-
-    listFrame._EchoesDefaults = d
-end
-
-local function RestoreDropDownListDefaults(listFrame)
-    local d = listFrame and listFrame._EchoesDefaults
-    if not listFrame or not d then return end
-
-    if listFrame.SetBackdrop then
-        listFrame:SetBackdrop(d.backdrop)
-        if d.backdropColor and listFrame.SetBackdropColor then
-            listFrame:SetBackdropColor(unpack(d.backdropColor))
-        end
-        if d.borderColor and listFrame.SetBackdropBorderColor then
-            listFrame:SetBackdropBorderColor(unpack(d.borderColor))
-        end
-    end
-
-    if d.named then
-        for _, entry in pairs(d.named) do
-            local obj = entry.obj
-            if obj then
-                if entry.texture and obj.SetTexture then obj:SetTexture(entry.texture) end
-                if entry.alpha and obj.SetAlpha then obj:SetAlpha(entry.alpha) end
-                if entry.v1 and obj.SetVertexColor then obj:SetVertexColor(unpack(entry.v1)) end
-                if entry.shown == false and obj.Hide then obj:Hide() end
-                if entry.shown == true and obj.Show then obj:Show() end
-            end
-        end
-    end
-
-    if d.regions then
-        for _, r in ipairs(d.regions) do
-            local tex = r.tex
-            if tex then
-                if tex.SetTexture then tex:SetTexture(r.texture) end
-                if r.alpha and tex.SetAlpha then tex:SetAlpha(r.alpha) end
-                if r.blend and tex.SetBlendMode then tex:SetBlendMode(r.blend) end
-                if r.v1 and tex.SetVertexColor then tex:SetVertexColor(unpack(r.v1)) end
-                if r.shown == false and tex.Hide then tex:Hide() end
-                if r.shown == true and tex.Show then tex:Show() end
-            end
-        end
-    end
-
-    if d.buttons then
-        for _, entry in pairs(d.buttons) do
-            local btn = entry.btn
-            if btn then
-                -- Restore highlight texture
-                if btn.SetHighlightTexture then
-                    if entry.htTexture ~= nil then
-                        btn:SetHighlightTexture(entry.htTexture)
-                    else
-                        btn:SetHighlightTexture(nil)
-                    end
-                end
-
-                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
-                if ht then
-                    if entry.htAlpha and ht.SetAlpha then ht:SetAlpha(entry.htAlpha) end
-                    if entry.htV and ht.SetVertexColor then ht:SetVertexColor(unpack(entry.htV)) end
-                end
-
-                -- Restore text color
-                if entry.text and entry.textColor and entry.text.SetTextColor then
-                    entry.text:SetTextColor(unpack(entry.textColor))
-                end
-
-                if entry.check and entry.checkV and entry.check.SetVertexColor then
-                    entry.check:SetVertexColor(unpack(entry.checkV))
-                end
-                if entry.uncheck and entry.uncheckV and entry.uncheck.SetVertexColor then
-                    entry.uncheck:SetVertexColor(unpack(entry.uncheckV))
-                end
-                if entry.arrow and entry.arrowV and entry.arrow.SetVertexColor then
-                    entry.arrow:SetVertexColor(unpack(entry.arrowV))
-                end
-            end
-        end
-    end
-
-    listFrame._EchoesSkinnedNow = nil
-end
-
--- Skin the opened dropdown menu (UIDropDownMenu / AceGUI Dropdown list)
-local function SkinDropDownListFrame(listFrame)
-    if not listFrame or not listFrame.SetBackdrop then return end
-
-    -- Always capture defaults once so we can restore for non-Echoes dropdowns.
-    CaptureDropDownListDefaults(listFrame)
-
-    if not IsEchoesDropdownMenuOpen() then
-        -- Ensure we don't leave Echoes theming behind for other addons.
-        RestoreDropDownListDefaults(listFrame)
-        return
-    end
-
-    if listFrame._EchoesSkinnedNow then return end
-    listFrame._EchoesSkinnedNow = true
-
-    -- Hide Blizzard textures (do not nil them; we need to restore them)
-    local name = listFrame.GetName and listFrame:GetName() or nil
-    if name then
-        local bd = _G[name .. "Backdrop"]
-        if bd and bd.Hide then bd:Hide() end
-        local mbd = _G[name .. "MenuBackdrop"]
-        if mbd and mbd.Hide then mbd:Hide() end
-    end
-
-    if listFrame.GetRegions then
-        local regs = { listFrame:GetRegions() }
-        for _, r in ipairs(regs) do
-            if r and r.IsObjectType and r:IsObjectType("Texture") and r.Hide then
-                r:Hide()
-            end
-        end
-    end
-
-    SkinBackdrop(listFrame, 0.98)
-    listFrame:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
-    listFrame:SetBackdropBorderColor(0, 0, 0, 1)
-
-    -- Any Echoes-owned dropdown menu can contain class names; color those entries by class.
-
-    local function StripColorCodes(s)
-        if type(s) ~= "string" then return s end
-        s = s:gsub("|c%x%x%x%x%x%x%x%x", "")
-        s = s:gsub("|r", "")
-        return s
-    end
-
-    local function ClassFileFromDisplayName(text)
-        if type(text) ~= "string" then return nil end
-        local t = StripColorCodes(text)
-        t = t:lower()
-        t = t:gsub("%s+", " ")
-        t = t:gsub("^%s+", "")
-        t = t:gsub("%s+$", "")
-
-        if t == "none" or t == "" then return nil end
-        if t == "paladin" or t == "pally" then return "PALADIN" end
-        if t == "death knight" or t == "deathknight" or t == "dk" then return "DEATHKNIGHT" end
-        if t == "warrior" or t == "war" then return "WARRIOR" end
-        if t == "shaman" or t == "sham" then return "SHAMAN" end
-        if t == "hunter" or t == "hunt" then return "HUNTER" end
-        if t == "druid" then return "DRUID" end
-        if t == "rogue" then return "ROGUE" end
-        if t == "priest" then return "PRIEST" end
-        if t == "warlock" or t == "lock" then return "WARLOCK" end
-        if t == "mage" then return "MAGE" end
-        return nil
-    end
-
-    -- Buttons inside the list (only tweak highlight + text colors)
-    local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
-    if name then
-        for i = 1, maxButtons do
-            local btn = _G[name .. "Button" .. i]
-            if btn then
-                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
-                if btn.SetHighlightTexture and not ht then
-                    btn:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
-                    ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
-                end
-                if ht then
-                    if ht.SetTexture then ht:SetTexture("Interface\\Buttons\\WHITE8x8") end
-                    if ht.SetVertexColor then ht:SetVertexColor(0.12, 0.12, 0.12, 0.9) end
-                    if ht.ClearAllPoints and ht.SetPoint then
-                        ht:ClearAllPoints()
-                        ht:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -1)
-                        ht:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
-                    end
-                end
-
-                local text = btn.GetFontString and btn:GetFontString() or btn.normalText
-                if text and text.SetTextColor then
-                    local label = text.GetText and text:GetText() or nil
-                    local classFile = label and ClassFileFromDisplayName(label) or nil
-                    if classFile then
-                        local colors = rawget(_G, "RAID_CLASS_COLORS")
-                        local c = colors and colors[classFile]
-                        if c then
-                            text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
-                        else
-                            text:SetTextColor(0.90, 0.85, 0.70, 1)
-                        end
-                    else
-                        local stripped = label and StripColorCodes(label) or ""
-                        if stripped:lower() == "none" then
-                            text:SetTextColor(0.60, 0.60, 0.60, 1)
-                        else
-                            text:SetTextColor(0.90, 0.85, 0.70, 1)
-                        end
-                    end
-                end
-
-                local check = _G[name .. "Button" .. i .. "Check"]
-                if check and check.SetVertexColor then
-                    check:SetVertexColor(0.90, 0.85, 0.70, 1)
-                end
-
-                local uncheck = _G[name .. "Button" .. i .. "UnCheck"]
-                if uncheck and uncheck.SetVertexColor then
-                    uncheck:SetVertexColor(0.30, 0.30, 0.30, 0.8)
-                end
-
-                local arrow = _G[name .. "Button" .. i .. "ExpandArrow"]
-                if arrow and arrow.SetVertexColor then
-                    arrow:SetVertexColor(0.85, 0.85, 0.85, 1)
-                end
-            end
-        end
-    end
-end
-
-local function HookUIDropDownMenuSkins()
-    if _G._EchoesUIDropDownSkinned then return end
-    _G._EchoesUIDropDownSkinned = true
-
-    -- Skin already-created list frames and ensure they stay skinned
-    local maxLevels = rawget(_G, "UIDROPDOWNMENU_MAXLEVELS") or 3
-    for level = 1, maxLevels do
-        local lf = _G["DropDownList" .. level]
-        if lf and lf.HookScript and not lf._EchoesHooked then
-            lf._EchoesHooked = true
-            lf:HookScript("OnShow", SkinDropDownListFrame)
-            lf:HookScript("OnHide", RestoreDropDownListDefaults)
-        end
-    end
-
-    -- Also hook creation of additional levels if the client creates them later
-    if type(hooksecurefunc) == "function" and type(_G.UIDropDownMenu_CreateFrames) == "function" then
-        hooksecurefunc("UIDropDownMenu_CreateFrames", function(level, index)
-            local lf = _G["DropDownList" .. tostring(level)]
-            if lf and lf.HookScript and not lf._EchoesHooked then
-                lf._EchoesHooked = true
-                lf:HookScript("OnShow", SkinDropDownListFrame)
-                lf:HookScript("OnHide", RestoreDropDownListDefaults)
-            end
-        end)
-    end
-end
+-- NOTE: Echoes intentionally does not skin UIDropDownMenu popup list frames.
+-- Those DropDownList* frames are global singletons shared with Blizzard UI and
+-- other addons. Echoes styling is kept fully self-contained.
 
 local function SkinEditBox(widget)
     if not widget or not widget.editbox then return end
@@ -1182,8 +833,6 @@ function Echoes:CreateMainWindow()
     if self.UI.frame then
         return
     end
-
-    HookUIDropDownMenuSkins()
 
     local frame = AceGUI:Create("Frame")
     frame:SetTitle("Echoes")
@@ -1635,30 +1284,11 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
-    -- Auto-pick player's class for Group 1, Slot 1
-    local playerClassFile = select(2, UnitClass("player"))
-    local classToSlot = {
-        PALADIN      = "Paladin",
-        DEATHKNIGHT  = "Death Knight",
-        WARRIOR      = "Warrior",
-        SHAMAN       = "Shaman",
-        HUNTER       = "Hunter",
-        DRUID        = "Druid",
-        ROGUE        = "Rogue",
-        PRIEST       = "Priest",
-        WARLOCK      = "Warlock",
-        MAGE         = "Mage",
-    }
-    local playerSlotText = playerClassFile and classToSlot[playerClassFile] or nil
-    local playerSlotIndex
-    if playerSlotText then
-        for i = 1, #GROUP_SLOT_OPTIONS do
-            if GROUP_SLOT_OPTIONS[i] == playerSlotText then
-                playerSlotIndex = i
-                break
-            end
-        end
-    end
+    -- Expose helpers for roster-driven updates.
+    self.UI._GroupSlotApplyColor = ApplyGroupSlotSelectedTextColor
+    self.UI._GroupSlotSlotValues = slotValues
+
+    self.UI.groupSlots = {}
 
     for colIndex, cfg in ipairs(COLUMN_CONFIG) do
         local col = AceGUI:Create("InlineGroup")
@@ -1673,13 +1303,15 @@ function Echoes:BuildGroupTab(container)
         SkinInlineGroup(col)
         gridGroup:AddChild(col)
 
+        self.UI.groupSlots[colIndex] = self.UI.groupSlots[colIndex] or {}
+
         for rowIndex = 1, cfg.rows do
             local rowGroup = AceGUI:Create("SimpleGroup")
             rowGroup:SetFullWidth(true)
             rowGroup:SetLayout("Flow")
             col:AddChild(rowGroup)
 
-            local isPlayerSlot = (colIndex == 1 and rowIndex == 1 and playerSlotIndex ~= nil)
+            local isPlayerSlot = false
 
             local cycleBtn
             local function CycleUpdate(btn)
@@ -1740,68 +1372,59 @@ function Echoes:BuildGroupTab(container)
                 end
             end
 
-            if not isPlayerSlot then
-                cycleBtn = AceGUI:Create("Button")
-                cycleBtn:SetRelativeWidth(0.12)
-                cycleBtn:SetHeight(INPUT_HEIGHT)
-                cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
-                cycleBtn.index  = 1
+            cycleBtn = AceGUI:Create("Button")
+            cycleBtn:SetRelativeWidth(0.12)
+            cycleBtn:SetHeight(INPUT_HEIGHT)
+            cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            cycleBtn.index  = 1
+            cycleBtn._EchoesCycleUpdate = CycleUpdate
 
-                cycleBtn:SetCallback("OnClick", function(widget, event, button)
-                    local btn = widget
-                    if not btn.values or #btn.values == 0 then return end
-                    if button == "RightButton" then
-                        btn.index = btn.index - 1
-                        if btn.index < 1 then btn.index = #btn.values end
-                    else
-                        btn.index = btn.index + 1
-                        if btn.index > #btn.values then btn.index = 1 end
-                    end
-                    CycleUpdate(btn)
-                end)
+            cycleBtn:SetCallback("OnClick", function(widget, event, button)
+                local btn = widget
+                if not btn.values or #btn.values == 0 then return end
+                if button == "RightButton" then
+                    btn.index = btn.index - 1
+                    if btn.index < 1 then btn.index = #btn.values end
+                else
+                    btn.index = btn.index + 1
+                    if btn.index > #btn.values then btn.index = 1 end
+                end
+                CycleUpdate(btn)
+            end)
 
-                CycleUpdate(cycleBtn)
-                rowGroup:AddChild(cycleBtn)
-                SkinButton(cycleBtn)
-            end
+            CycleUpdate(cycleBtn)
+            rowGroup:AddChild(cycleBtn)
+            SkinButton(cycleBtn)
 
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
-            dd:SetValue(isPlayerSlot and playerSlotIndex or 1)
-            dd:SetRelativeWidth(isPlayerSlot and 0.68 or 0.58)
+            dd:SetValue(1)
+            dd:SetRelativeWidth(0.58)
 
             -- Mark these dropdowns so our dropdown popup theming can color class names
             -- and the selected value can be class-colored/disabled-grey.
             if dd.dropdown then
                 dd.dropdown._EchoesOwned = true
                 dd.dropdown._EchoesDropdownKind = "groupSlot"
-                if isPlayerSlot then
-                    dd.dropdown._EchoesForceDisabledGrey = true
+            end
+
+            dd:SetCallback("OnValueChanged", function(widget, event, value)
+                if widget._EchoesSuppress then return end
+                local text = slotValues[value]
+                local vals = GetCycleValuesForRightText(text)
+                if cycleBtn then
+                    cycleBtn.values = { unpack(vals) }
+                    cycleBtn.index  = 1
+                    CycleUpdate(cycleBtn)
                 end
-            end
 
-            if not isPlayerSlot then
-                dd:SetCallback("OnValueChanged", function(widget, event, value)
-                    local text = slotValues[value]
-                    local vals = GetCycleValuesForRightText(text)
-                    if cycleBtn then
-                        cycleBtn.values = { unpack(vals) }
-                        cycleBtn.index  = 1
-                        CycleUpdate(cycleBtn)
-                    end
-
-                    ApplyGroupSlotSelectedTextColor(widget, value)
-                end)
-            else
-                if dd.SetDisabled then dd:SetDisabled(true) end
-                if dd.dropdown and dd.dropdown.EnableMouse then dd.dropdown:EnableMouse(false) end
-                if dd.button and dd.button.Disable then dd.button:Disable() end
-            end
+                ApplyGroupSlotSelectedTextColor(widget, value)
+            end)
 
             rowGroup:AddChild(dd)
             SkinDropdown(dd)
 
-            ApplyGroupSlotSelectedTextColor(dd, isPlayerSlot and playerSlotIndex or 1)
+            ApplyGroupSlotSelectedTextColor(dd, 1)
 
             local nameBtn = AceGUI:Create("Button")
             nameBtn:SetText("Name")
@@ -1813,10 +1436,11 @@ function Echoes:BuildGroupTab(container)
             rowGroup:AddChild(nameBtn)
             SkinButton(nameBtn)
 
-            if isPlayerSlot then
-                if nameBtn.SetDisabled then nameBtn:SetDisabled(true) end
-                if nameBtn.frame and nameBtn.frame.EnableMouse then nameBtn.frame:EnableMouse(false) end
-            end
+            self.UI.groupSlots[colIndex][rowIndex] = {
+                cycleBtn = cycleBtn,
+                classDrop = dd,
+                nameBtn = nameBtn,
+            }
         end
     end
 
@@ -1849,6 +1473,192 @@ function Echoes:BuildGroupTab(container)
     end)
     actionCol:AddChild(talentsBtn)
     SkinButton(talentsBtn)
+
+    -- Initialize from roster once the page is built.
+    self:UpdateGroupCreationFromRoster(true)
+end
+
+local function Echoes_GetGroupSlotIndexForClassFile(classFile)
+    if not classFile then return nil end
+    if classFile == "PALADIN" then return 2 end
+    if classFile == "DEATHKNIGHT" then return 3 end
+    if classFile == "WARRIOR" then return 4 end
+    if classFile == "SHAMAN" then return 5 end
+    if classFile == "HUNTER" then return 6 end
+    if classFile == "DRUID" then return 7 end
+    if classFile == "ROGUE" then return 8 end
+    if classFile == "PRIEST" then return 9 end
+    if classFile == "WARLOCK" then return 10 end
+    if classFile == "MAGE" then return 11 end
+    return nil
+end
+
+function Echoes:UpdateGroupCreationFromRoster(force)
+    if not self.UI or not self.UI.groupSlots then return end
+
+    local applyColor = self.UI._GroupSlotApplyColor
+    local colors = rawget(_G, "RAID_CLASS_COLORS")
+
+    local function GreyTintClassColor(c)
+        if not c then return 1, 1, 1 end
+        local grey = 0.65
+        local mix = 0.25
+        local r = (c.r or 1) * (1 - mix) + grey * mix
+        local g = (c.g or 1) * (1 - mix) + grey * mix
+        local b = (c.b or 1) * (1 - mix) + grey * mix
+        return r, g, b
+    end
+
+    local function SetEnabledForWidget(widget, enabled)
+        if not widget then return end
+        if widget.SetDisabled then widget:SetDisabled(not enabled) end
+        if widget.frame and widget.frame.EnableMouse then widget.frame:EnableMouse(enabled) end
+    end
+
+    local function SetEnabledForDropdown(dd, enabled)
+        if not dd then return end
+        if dd.SetDisabled then dd:SetDisabled(not enabled) end
+        if dd.dropdown and dd.dropdown.EnableMouse then dd.dropdown:EnableMouse(enabled) end
+        if dd.button then
+            if enabled and dd.button.Enable then dd.button:Enable() end
+            if (not enabled) and dd.button.Disable then dd.button:Disable() end
+        end
+    end
+
+    local function ResetSlot(slot)
+        if not slot then return end
+        SetEnabledForWidget(slot.cycleBtn, true)
+        SetEnabledForDropdown(slot.classDrop, true)
+        SetEnabledForWidget(slot.nameBtn, true)
+
+        if slot.nameBtn and slot.nameBtn.SetText then
+            slot.nameBtn:SetText("Name")
+        end
+        if slot.nameBtn and slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
+            slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
+        end
+
+        if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
+            local baseList = self.UI and self.UI._GroupSlotSlotValues
+            slot.classDrop._EchoesSuppress = true
+            if baseList then
+                slot.classDrop:SetList(baseList)
+            end
+            slot.classDrop:SetValue(1) -- None
+            slot.classDrop._EchoesSuppress = nil
+            if applyColor then applyColor(slot.classDrop, 1) end
+        end
+
+        if slot.cycleBtn then
+            slot.cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            slot.cycleBtn.index = 1
+            if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
+        end
+    end
+
+    local function FillSlot(slot, member)
+        if not slot or not member then return end
+
+        -- Occupied slots: show the member name in the dropdown display.
+        local c = member.classFile and colors and colors[member.classFile]
+        if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
+            slot.classDrop._EchoesSuppress = true
+            slot.classDrop:SetList({ [1] = member.name or "" })
+            slot.classDrop:SetValue(1)
+            slot.classDrop._EchoesSuppress = nil
+
+            if slot.classDrop.text and slot.classDrop.text.SetTextColor then
+                if c then
+                    local r, g, b = GreyTintClassColor(c)
+                    slot.classDrop.text:SetTextColor(r, g, b, 1)
+                else
+                    slot.classDrop.text:SetTextColor(1, 1, 1, 1)
+                end
+            end
+        end
+        SetEnabledForDropdown(slot.classDrop, false)
+
+        -- Name button stays available for future actions; keep default label.
+        if slot.nameBtn and slot.nameBtn.SetText then
+            slot.nameBtn:SetText("Name")
+        end
+        if slot.nameBtn and slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
+            slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
+        end
+        SetEnabledForWidget(slot.nameBtn, true)
+
+        if slot.cycleBtn then
+            local classIndex = Echoes_GetGroupSlotIndexForClassFile(member.classFile)
+            local display = (classIndex and self.UI._GroupSlotSlotValues and self.UI._GroupSlotSlotValues[classIndex]) or nil
+            local vals = GetCycleValuesForRightText(display)
+
+            slot.cycleBtn._EchoesLastClassFile = slot.cycleBtn._EchoesLastClassFile or member.classFile
+            if slot.cycleBtn._EchoesLastClassFile ~= member.classFile then
+                slot.cycleBtn.index = 1
+                slot.cycleBtn._EchoesLastClassFile = member.classFile
+            end
+
+            slot.cycleBtn.values = { unpack(vals) }
+            if not slot.cycleBtn.index or slot.cycleBtn.index < 1 or slot.cycleBtn.index > #slot.cycleBtn.values then
+                slot.cycleBtn.index = 1
+            end
+            if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
+        end
+
+        -- Spec box should always be changeable, even when the raid slot is filled.
+        SetEnabledForWidget(slot.cycleBtn, true)
+    end
+
+    -- Build members by subgroup in roster order.
+    local membersByGroup = {}
+    local n = (type(GetNumRaidMembers) == "function" and GetNumRaidMembers()) or 0
+    local inRaid = (UnitInRaid and UnitInRaid("player") and UnitInRaid("player") ~= 0 and n > 0)
+
+    if inRaid then
+        for i = 1, n do
+            local name, _, subgroup, _, classFile = GetRaidRosterInfo(i)
+            subgroup = tonumber(subgroup)
+            if subgroup and subgroup >= 1 and subgroup <= 5 then
+                membersByGroup[subgroup] = membersByGroup[subgroup] or {}
+                local unit = "raid" .. i
+
+                membersByGroup[subgroup][#membersByGroup[subgroup] + 1] = {
+                    unit = unit,
+                    name = name,
+                    classFile = classFile,
+                    isPlayer = (UnitIsUnit and UnitIsUnit(unit, "player")) or false,
+                }
+            end
+        end
+    else
+        membersByGroup[1] = {
+            {
+                unit = "player",
+                name = UnitName("player"),
+                classFile = select(2, UnitClass("player")),
+                isPlayer = true,
+            },
+        }
+    end
+
+    for group = 1, 5 do
+        for pos = 1, 5 do
+            local slot = self.UI.groupSlots[group] and self.UI.groupSlots[group][pos] or nil
+            if slot then
+                local member = membersByGroup[group] and membersByGroup[group][pos] or nil
+                if member then
+                    FillSlot(slot, member)
+                else
+                    ResetSlot(slot)
+                end
+            end
+        end
+    end
+end
+
+-- Backwards compat: keep the old name but drive from full roster now.
+function Echoes:UpdateGroupCreationPlayerSlot(force)
+    self:UpdateGroupCreationFromRoster(force)
 end
 
 ------------------------------------------------------------
@@ -1977,6 +1787,17 @@ end
 
 function Echoes:OnEnable()
     self:BuildMinimapButton()
+
+    -- Keep Group Creation "player slot" in sync with raid changes and spec changes.
+    self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEchoesRosterOrSpecChanged")
+    self:RegisterEvent("RAID_ROSTER_UPDATE", "OnEchoesRosterOrSpecChanged")
+    self:RegisterEvent("PARTY_MEMBERS_CHANGED", "OnEchoesRosterOrSpecChanged")
+    self:RegisterEvent("PLAYER_TALENT_UPDATE", "OnEchoesRosterOrSpecChanged")
+    self:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED", "OnEchoesRosterOrSpecChanged")
+end
+
+function Echoes:OnEchoesRosterOrSpecChanged()
+    self:UpdateGroupCreationFromRoster(false)
 end
 
 function Echoes:OnDisable()
