@@ -325,6 +325,11 @@ local function SkinDropdown(widget)
         widget.dropdown:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     end
 
+    -- Mark ownership so popup theming can be scoped to Echoes only
+    if widget.dropdown then
+        widget.dropdown._EchoesOwned = true
+    end
+
     -- Skin the box (match Echoes dark theme)
     SkinBackdrop(box, 0.95)
     box:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
@@ -410,31 +415,230 @@ local function SkinDropdown(widget)
     end
 end
 
+-- Determine whether the currently-opening UIDropDownMenu belongs to Echoes.
+-- IMPORTANT: DropDownList* frames are global singletons shared by every addon,
+-- so we must only apply theming when an Echoes-owned dropdown is open, and
+-- restore the default appearance afterwards.
+local function IsEchoesOwnedDropdownFrame(frame)
+    if not frame then return false end
+    if frame._EchoesOwned then return true end
+    if frame.GetParent then
+        local p = frame:GetParent()
+        while p do
+            if p._EchoesOwned then return true end
+            if not p.GetParent then break end
+            p = p:GetParent()
+        end
+    end
+    return false
+end
+
+local function IsEchoesDropdownMenuOpen()
+    local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU") or rawget(_G, "UIDROPDOWNMENU_INIT_MENU")
+    return IsEchoesOwnedDropdownFrame(openMenu)
+end
+
+local function CaptureDropDownListDefaults(listFrame)
+    if not listFrame or listFrame._EchoesDefaults then return end
+
+    local d = {}
+    if listFrame.GetBackdrop then d.backdrop = listFrame:GetBackdrop() end
+    if listFrame.GetBackdropColor then d.backdropColor = { listFrame:GetBackdropColor() } end
+    if listFrame.GetBackdropBorderColor then d.borderColor = { listFrame:GetBackdropBorderColor() } end
+
+    d.regions = {}
+    if listFrame.GetRegions then
+        local regs = { listFrame:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") then
+                d.regions[#d.regions + 1] = {
+                    tex = r,
+                    texture = r.GetTexture and r:GetTexture() or nil,
+                    alpha = r.GetAlpha and r:GetAlpha() or nil,
+                    blend = r.GetBlendMode and r:GetBlendMode() or nil,
+                    shown = r.IsShown and r:IsShown() or nil,
+                    v1 = r.GetVertexColor and ({ r:GetVertexColor() }) or nil,
+                }
+            end
+        end
+    end
+
+    d.named = {}
+    local name = listFrame.GetName and listFrame:GetName() or nil
+    if name then
+        for _, suffix in ipairs({ "Backdrop", "MenuBackdrop" }) do
+            local obj = _G[name .. suffix]
+            if obj then
+                d.named[suffix] = {
+                    obj = obj,
+                    shown = obj.IsShown and obj:IsShown() or nil,
+                    texture = obj.GetTexture and obj:GetTexture() or nil,
+                    alpha = obj.GetAlpha and obj:GetAlpha() or nil,
+                    v1 = obj.GetVertexColor and ({ obj:GetVertexColor() }) or nil,
+                }
+            end
+        end
+    end
+
+    d.buttons = {}
+    local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
+    if name then
+        for i = 1, maxButtons do
+            local btn = _G[name .. "Button" .. i]
+            if btn then
+                local entry = { btn = btn }
+
+                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
+                entry.ht = ht
+                if ht then
+                    entry.htTexture = ht.GetTexture and ht:GetTexture() or nil
+                    entry.htAlpha = ht.GetAlpha and ht:GetAlpha() or nil
+                    entry.htV = ht.GetVertexColor and ({ ht:GetVertexColor() }) or nil
+                end
+
+                local text = btn.GetFontString and btn:GetFontString() or btn.normalText
+                entry.text = text
+                if text and text.GetTextColor then
+                    entry.textColor = { text:GetTextColor() }
+                end
+
+                local check = _G[name .. "Button" .. i .. "Check"]
+                entry.check = check
+                if check and check.GetVertexColor then
+                    entry.checkV = { check:GetVertexColor() }
+                end
+
+                local uncheck = _G[name .. "Button" .. i .. "UnCheck"]
+                entry.uncheck = uncheck
+                if uncheck and uncheck.GetVertexColor then
+                    entry.uncheckV = { uncheck:GetVertexColor() }
+                end
+
+                local arrow = _G[name .. "Button" .. i .. "ExpandArrow"]
+                entry.arrow = arrow
+                if arrow and arrow.GetVertexColor then
+                    entry.arrowV = { arrow:GetVertexColor() }
+                end
+
+                d.buttons[i] = entry
+            end
+        end
+    end
+
+    listFrame._EchoesDefaults = d
+end
+
+local function RestoreDropDownListDefaults(listFrame)
+    local d = listFrame and listFrame._EchoesDefaults
+    if not listFrame or not d then return end
+
+    if listFrame.SetBackdrop then
+        listFrame:SetBackdrop(d.backdrop)
+        if d.backdropColor and listFrame.SetBackdropColor then
+            listFrame:SetBackdropColor(unpack(d.backdropColor))
+        end
+        if d.borderColor and listFrame.SetBackdropBorderColor then
+            listFrame:SetBackdropBorderColor(unpack(d.borderColor))
+        end
+    end
+
+    if d.named then
+        for _, entry in pairs(d.named) do
+            local obj = entry.obj
+            if obj then
+                if entry.texture and obj.SetTexture then obj:SetTexture(entry.texture) end
+                if entry.alpha and obj.SetAlpha then obj:SetAlpha(entry.alpha) end
+                if entry.v1 and obj.SetVertexColor then obj:SetVertexColor(unpack(entry.v1)) end
+                if entry.shown == false and obj.Hide then obj:Hide() end
+                if entry.shown == true and obj.Show then obj:Show() end
+            end
+        end
+    end
+
+    if d.regions then
+        for _, r in ipairs(d.regions) do
+            local tex = r.tex
+            if tex then
+                if tex.SetTexture then tex:SetTexture(r.texture) end
+                if r.alpha and tex.SetAlpha then tex:SetAlpha(r.alpha) end
+                if r.blend and tex.SetBlendMode then tex:SetBlendMode(r.blend) end
+                if r.v1 and tex.SetVertexColor then tex:SetVertexColor(unpack(r.v1)) end
+                if r.shown == false and tex.Hide then tex:Hide() end
+                if r.shown == true and tex.Show then tex:Show() end
+            end
+        end
+    end
+
+    if d.buttons then
+        for _, entry in pairs(d.buttons) do
+            local btn = entry.btn
+            if btn then
+                -- Restore highlight texture
+                if btn.SetHighlightTexture then
+                    if entry.htTexture ~= nil then
+                        btn:SetHighlightTexture(entry.htTexture)
+                    else
+                        btn:SetHighlightTexture(nil)
+                    end
+                end
+
+                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
+                if ht then
+                    if entry.htAlpha and ht.SetAlpha then ht:SetAlpha(entry.htAlpha) end
+                    if entry.htV and ht.SetVertexColor then ht:SetVertexColor(unpack(entry.htV)) end
+                end
+
+                -- Restore text color
+                if entry.text and entry.textColor and entry.text.SetTextColor then
+                    entry.text:SetTextColor(unpack(entry.textColor))
+                end
+
+                if entry.check and entry.checkV and entry.check.SetVertexColor then
+                    entry.check:SetVertexColor(unpack(entry.checkV))
+                end
+                if entry.uncheck and entry.uncheckV and entry.uncheck.SetVertexColor then
+                    entry.uncheck:SetVertexColor(unpack(entry.uncheckV))
+                end
+                if entry.arrow and entry.arrowV and entry.arrow.SetVertexColor then
+                    entry.arrow:SetVertexColor(unpack(entry.arrowV))
+                end
+            end
+        end
+    end
+
+    listFrame._EchoesSkinnedNow = nil
+end
+
 -- Skin the opened dropdown menu (UIDropDownMenu / AceGUI Dropdown list)
 local function SkinDropDownListFrame(listFrame)
-    if not listFrame or not listFrame.SetBackdrop or listFrame._EchoesSkinned then return end
-    listFrame._EchoesSkinned = true
+    if not listFrame or not listFrame.SetBackdrop then return end
 
-    -- Remove Blizzard textures (backdrop/menubackdrop + any other regions)
+    -- Always capture defaults once so we can restore for non-Echoes dropdowns.
+    CaptureDropDownListDefaults(listFrame)
+
+    if not IsEchoesDropdownMenuOpen() then
+        -- Ensure we don't leave Echoes theming behind for other addons.
+        RestoreDropDownListDefaults(listFrame)
+        return
+    end
+
+    if listFrame._EchoesSkinnedNow then return end
+    listFrame._EchoesSkinnedNow = true
+
+    -- Hide Blizzard textures (do not nil them; we need to restore them)
     local name = listFrame.GetName and listFrame:GetName() or nil
     if name then
         local bd = _G[name .. "Backdrop"]
-        if bd then
-            if bd.SetTexture then bd:SetTexture(nil) end
-            if bd.Hide then bd:Hide() end
-        end
+        if bd and bd.Hide then bd:Hide() end
         local mbd = _G[name .. "MenuBackdrop"]
-        if mbd then
-            if mbd.SetTexture then mbd:SetTexture(nil) end
-            if mbd.Hide then mbd:Hide() end
-        end
+        if mbd and mbd.Hide then mbd:Hide() end
     end
 
     if listFrame.GetRegions then
         local regs = { listFrame:GetRegions() }
         for _, r in ipairs(regs) do
-            if r and r.IsObjectType and r:IsObjectType("Texture") then
-                r:SetTexture(nil)
+            if r and r.IsObjectType and r:IsObjectType("Texture") and r.Hide then
+                r:Hide()
             end
         end
     end
@@ -443,20 +647,21 @@ local function SkinDropDownListFrame(listFrame)
     listFrame:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
     listFrame:SetBackdropBorderColor(0, 0, 0, 1)
 
-    -- Buttons inside the list
+    -- Buttons inside the list (only tweak highlight + text colors)
     local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
     if name then
         for i = 1, maxButtons do
             local btn = _G[name .. "Button" .. i]
             if btn then
-                if btn.SetNormalTexture then btn:SetNormalTexture(nil) end
-                if btn.SetPushedTexture then btn:SetPushedTexture(nil) end
-
-                if btn.SetHighlightTexture then
+                local ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
+                if btn.SetHighlightTexture and not ht then
                     btn:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
-                    local ht = btn:GetHighlightTexture()
-                    if ht then
-                        ht:SetVertexColor(0.12, 0.12, 0.12, 0.9)
+                    ht = btn.GetHighlightTexture and btn:GetHighlightTexture() or nil
+                end
+                if ht then
+                    if ht.SetTexture then ht:SetTexture("Interface\\Buttons\\WHITE8x8") end
+                    if ht.SetVertexColor then ht:SetVertexColor(0.12, 0.12, 0.12, 0.9) end
+                    if ht.ClearAllPoints and ht.SetPoint then
                         ht:ClearAllPoints()
                         ht:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -1)
                         ht:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
@@ -498,7 +703,7 @@ local function HookUIDropDownMenuSkins()
         if lf and lf.HookScript and not lf._EchoesHooked then
             lf._EchoesHooked = true
             lf:HookScript("OnShow", SkinDropDownListFrame)
-            SkinDropDownListFrame(lf)
+            lf:HookScript("OnHide", RestoreDropDownListDefaults)
         end
     end
 
@@ -509,8 +714,8 @@ local function HookUIDropDownMenuSkins()
             if lf and lf.HookScript and not lf._EchoesHooked then
                 lf._EchoesHooked = true
                 lf:HookScript("OnShow", SkinDropDownListFrame)
+                lf:HookScript("OnHide", RestoreDropDownListDefaults)
             end
-            SkinDropDownListFrame(lf)
         end)
     end
 end
