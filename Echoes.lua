@@ -1020,7 +1020,7 @@ local CYCLE_VALUES_BY_RIGHT_TEXT = {
     ["Mage"] = {
         { label = "Arcane", icon = "Interface\\Icons\\Spell_Holy_MagicalSentry" },
         { label = "Fire",   icon = "Interface\\Icons\\Spell_Fire_FireBolt02" },
-        { label = "Frostfire", icon = "Interface\\Icons\\Spell_FrostFirebolt02" },
+        { label = "Frostfire", icon = "Interface\\Icons\\Ability_mage_frostfirebolt" },
         { label = "Frost",  icon = "Interface\\Icons\\Spell_Frost_FrostBolt02" },
     },
 }
