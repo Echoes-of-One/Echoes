@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          PREV_TAG=""
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            PREV_TAG=$(git describe --tags --abbrev=0)
+          fi
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+            HEADER="Changes since ${PREV_TAG}"
+          else
+            RANGE="HEAD"
+            HEADER="Changes"
+          fi
+
+          NOTES=$(git log ${RANGE} --pretty=format:'- %s (%h)' || true)
+          if [ -z "$NOTES" ]; then
+            NOTES="- (no commit messages found)"
+          fi
+
+          {
+            echo "notes<<'EOF'"
+            echo "${HEADER}"
+            echo
+            echo "${NOTES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Package addon
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf dist
+          mkdir -p dist/Echoes
+
+          cp Echoes.lua dist/Echoes/
+          cp Echoes.toc dist/Echoes/
+
+          if [ ! -d "Ace3" ]; then
+            echo "ERROR: Expected an 'Ace3' folder at repo root, but it was not found." >&2
+            echo "Add Ace3 to this repository (e.g., vendor it or add as a submodule) so releases can include it." >&2
+            exit 1
+          fi
+
+          # Include Ace3 as a separate addon folder alongside Echoes.
+          cp -R Ace3 dist/
+
+          (cd dist && zip -r "../Echoes-${GITHUB_RUN_NUMBER}.zip" Echoes Ace3)
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.changelog.outputs.tag }}
+          name: Echoes ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          artifacts: Echoes-${{ github.run_number }}.zip
+          artifactContentType: application/zip
+          makeLatest: true
+          allowUpdates: false
+          prerelease: false
