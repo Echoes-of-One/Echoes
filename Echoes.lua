@@ -1299,7 +1299,8 @@ function Echoes:BuildGroupTab(container)
         end
         col:SetLayout("List")
         -- 3 columns per row; Flow will wrap the remaining groups to row 2.
-        col:SetRelativeWidth(0.32)
+        -- Slightly wider columns so the right-side button text doesn't clip.
+        col:SetRelativeWidth(0.325)
         SkinInlineGroup(col)
         gridGroup:AddChild(col)
 
@@ -1335,7 +1336,7 @@ function Echoes:BuildGroupTab(container)
                 if btn.frame and not btn._EchoesIconTex then
                     local t = btn.frame:CreateTexture(nil, "ARTWORK")
                     t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-                    t:SetPoint("LEFT", btn.frame, "LEFT", 4, 0)
+                    t:SetPoint("CENTER", btn.frame, "CENTER", 0, 0)
                     btn._EchoesIconTex = t
 
                     if btn.frame.HookScript then
@@ -1373,7 +1374,8 @@ function Echoes:BuildGroupTab(container)
             end
 
             cycleBtn = AceGUI:Create("Button")
-            cycleBtn:SetRelativeWidth(0.12)
+            -- Keep this button perfectly square.
+            cycleBtn:SetWidth(INPUT_HEIGHT)
             cycleBtn:SetHeight(INPUT_HEIGHT)
             cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
             cycleBtn.index  = 1
@@ -1399,7 +1401,7 @@ function Echoes:BuildGroupTab(container)
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
             dd:SetValue(1)
-            dd:SetRelativeWidth(0.58)
+            dd:SetRelativeWidth(0.54)
 
             -- Mark these dropdowns so our dropdown popup theming can color class names
             -- and the selected value can be class-colored/disabled-grey.
@@ -1428,13 +1430,18 @@ function Echoes:BuildGroupTab(container)
 
             local nameBtn = AceGUI:Create("Button")
             nameBtn:SetText("Name")
-            nameBtn:SetRelativeWidth(0.30)
+            nameBtn:SetRelativeWidth(0.32)
             nameBtn:SetHeight(INPUT_HEIGHT)
             nameBtn:SetCallback("OnClick", function()
                 Echoes_Print("Name clicked (stub).")
             end)
             rowGroup:AddChild(nameBtn)
             SkinButton(nameBtn)
+
+            if nameBtn.text and nameBtn.text.GetFont and nameBtn.text.SetFont then
+                local font, _, flags = nameBtn.text:GetFont()
+                nameBtn.text:SetFont(font, 8, flags)
+            end
 
             self.UI.groupSlots[colIndex][rowIndex] = {
                 cycleBtn = cycleBtn,
@@ -1452,7 +1459,7 @@ function Echoes:BuildGroupTab(container)
         if actionCol.titletext.Hide then actionCol.titletext:Hide() end
     end
     actionCol:SetLayout("List")
-    actionCol:SetRelativeWidth(0.32)
+    actionCol:SetRelativeWidth(0.325)
     SkinInlineGroup(actionCol)
     gridGroup:AddChild(actionCol)
 
