@@ -972,7 +972,7 @@ local DEFAULT_CYCLE_VALUES = {
 -- Note: These are the icons shown on the talent tabs, not arbitrary spell icons.
 local CYCLE_VALUES_BY_RIGHT_TEXT = {
     ["Paladin"] = {
-        { label = "Holy",        icon = "Interface\\Icons\\Spell_Holy_HolyGuidance" },
+        { label = "Holy",        icon = "Interface\\Icons\\Spell_Holy_HolyBolt" },
         { label = "Protection",  icon = "Interface\\Icons\\Spell_Holy_DevotionAura" },
         { label = "Retribution", icon = "Interface\\Icons\\Spell_Holy_AuraOfLight" },
     },
@@ -999,6 +999,7 @@ local CYCLE_VALUES_BY_RIGHT_TEXT = {
     ["Druid"] = {
         { label = "Balance",      icon = "Interface\\Icons\\Spell_Nature_StarFall" },
         { label = "Feral",        icon = "Interface\\Icons\\Ability_Druid_CatForm" },
+        { label = "Bear",         icon = "Interface\\Icons\\Ability_Racial_BearForm" },
         { label = "Restoration",  icon = "Interface\\Icons\\Spell_Nature_HealingTouch" },
     },
     ["Rogue"] = {
@@ -1019,6 +1020,7 @@ local CYCLE_VALUES_BY_RIGHT_TEXT = {
     ["Mage"] = {
         { label = "Arcane", icon = "Interface\\Icons\\Spell_Holy_MagicalSentry" },
         { label = "Fire",   icon = "Interface\\Icons\\Spell_Fire_FireBolt02" },
+        { label = "Frostfire", icon = "Interface\\Icons\\Spell_FrostFirebolt02" },
         { label = "Frost",  icon = "Interface\\Icons\\Spell_Frost_FrostBolt02" },
     },
 }
