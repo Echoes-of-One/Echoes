@@ -325,10 +325,10 @@ local function SkinDropdown(widget)
         widget.dropdown:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
     end
 
-    -- Skin the box
+    -- Skin the box (match Echoes dark theme)
     SkinBackdrop(box, 0.95)
-    box:SetBackdropColor(0.11, 0.11, 0.11, 0.98)
-    box:SetBackdropBorderColor(0.55, 0.55, 0.55, 1)
+    box:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
+    box:SetBackdropBorderColor(0, 0, 0, 1)
 
     -- Arrow button: make it a distinct square on the right
     local sepTex
@@ -346,8 +346,8 @@ local function SkinDropdown(widget)
             b:SetSize(18, 18)
 
             SkinBackdrop(b, 0.95)
-            b:SetBackdropColor(0.08, 0.08, 0.08, 0.98)
-            b:SetBackdropBorderColor(0.45, 0.45, 0.45, 1)
+            b:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
+            b:SetBackdropBorderColor(0, 0, 0, 1)
 
             if b.GetRegions then
                 local regs = { b:GetRegions() }
@@ -400,13 +400,118 @@ local function SkinDropdown(widget)
             widget.text:SetJustifyH("LEFT")
         end
         if widget.text.SetTextColor then
-            widget.text:SetTextColor(0.92, 0.92, 0.92, 1)
+            widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- match buttons
         end
     end
 
     -- Label styling (if a label is used)
     if widget.label and widget.label.SetTextColor then
         widget.label:SetTextColor(0.9, 0.9, 0.9, 1)
+    end
+end
+
+-- Skin the opened dropdown menu (UIDropDownMenu / AceGUI Dropdown list)
+local function SkinDropDownListFrame(listFrame)
+    if not listFrame or not listFrame.SetBackdrop or listFrame._EchoesSkinned then return end
+    listFrame._EchoesSkinned = true
+
+    -- Remove Blizzard textures (backdrop/menubackdrop + any other regions)
+    local name = listFrame.GetName and listFrame:GetName() or nil
+    if name then
+        local bd = _G[name .. "Backdrop"]
+        if bd then
+            if bd.SetTexture then bd:SetTexture(nil) end
+            if bd.Hide then bd:Hide() end
+        end
+        local mbd = _G[name .. "MenuBackdrop"]
+        if mbd then
+            if mbd.SetTexture then mbd:SetTexture(nil) end
+            if mbd.Hide then mbd:Hide() end
+        end
+    end
+
+    if listFrame.GetRegions then
+        local regs = { listFrame:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") then
+                r:SetTexture(nil)
+            end
+        end
+    end
+
+    SkinBackdrop(listFrame, 0.98)
+    listFrame:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
+    listFrame:SetBackdropBorderColor(0, 0, 0, 1)
+
+    -- Buttons inside the list
+    local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
+    if name then
+        for i = 1, maxButtons do
+            local btn = _G[name .. "Button" .. i]
+            if btn then
+                if btn.SetNormalTexture then btn:SetNormalTexture(nil) end
+                if btn.SetPushedTexture then btn:SetPushedTexture(nil) end
+
+                if btn.SetHighlightTexture then
+                    btn:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
+                    local ht = btn:GetHighlightTexture()
+                    if ht then
+                        ht:SetVertexColor(0.12, 0.12, 0.12, 0.9)
+                        ht:ClearAllPoints()
+                        ht:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -1)
+                        ht:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -2, 1)
+                    end
+                end
+
+                local text = btn.GetFontString and btn:GetFontString() or btn.normalText
+                if text and text.SetTextColor then
+                    text:SetTextColor(0.90, 0.85, 0.70, 1)
+                end
+
+                local check = _G[name .. "Button" .. i .. "Check"]
+                if check and check.SetVertexColor then
+                    check:SetVertexColor(0.90, 0.85, 0.70, 1)
+                end
+
+                local uncheck = _G[name .. "Button" .. i .. "UnCheck"]
+                if uncheck and uncheck.SetVertexColor then
+                    uncheck:SetVertexColor(0.30, 0.30, 0.30, 0.8)
+                end
+
+                local arrow = _G[name .. "Button" .. i .. "ExpandArrow"]
+                if arrow and arrow.SetVertexColor then
+                    arrow:SetVertexColor(0.85, 0.85, 0.85, 1)
+                end
+            end
+        end
+    end
+end
+
+local function HookUIDropDownMenuSkins()
+    if _G._EchoesUIDropDownSkinned then return end
+    _G._EchoesUIDropDownSkinned = true
+
+    -- Skin already-created list frames and ensure they stay skinned
+    local maxLevels = rawget(_G, "UIDROPDOWNMENU_MAXLEVELS") or 3
+    for level = 1, maxLevels do
+        local lf = _G["DropDownList" .. level]
+        if lf and lf.HookScript and not lf._EchoesHooked then
+            lf._EchoesHooked = true
+            lf:HookScript("OnShow", SkinDropDownListFrame)
+            SkinDropDownListFrame(lf)
+        end
+    end
+
+    -- Also hook creation of additional levels if the client creates them later
+    if type(hooksecurefunc) == "function" and type(_G.UIDropDownMenu_CreateFrames) == "function" then
+        hooksecurefunc("UIDropDownMenu_CreateFrames", function(level, index)
+            local lf = _G["DropDownList" .. tostring(level)]
+            if lf and lf.HookScript and not lf._EchoesHooked then
+                lf._EchoesHooked = true
+                lf:HookScript("OnShow", SkinDropDownListFrame)
+            end
+            SkinDropDownListFrame(lf)
+        end)
     end
 end
 
@@ -679,6 +784,8 @@ function Echoes:CreateMainWindow()
     if self.UI.frame then
         return
     end
+
+    HookUIDropDownMenuSkins()
 
     local frame = AceGUI:Create("Frame")
     frame:SetTitle("Echoes")
