@@ -951,6 +951,14 @@ function Echoes:BuildBotTab(container)
 
     moveGroup:SetHeight(32)
 
+    -- Extra vertical spacing between global movement buttons and the role matrix
+    -- (Empty SimpleGroups can collapse in AceGUI Flow layout; use a Label spacer instead.)
+    local moveRoleGap = AceGUI:Create("Label")
+    moveRoleGap:SetText(" ")
+    moveRoleGap:SetFullWidth(true)
+    moveRoleGap:SetHeight(18)
+    container:AddChild(moveRoleGap)
+
     ------------------------------------------------
     -- 5) Role Matrix: label + 4 buttons filling the row
     ------------------------------------------------
@@ -1001,13 +1009,6 @@ function Echoes:BuildBotTab(container)
 
         rowGroup:SetHeight(22)
     end
-end
-
-------------------------------------------------------------
--- Group Creation tab (unchanged layout)
-------------------------------------------------------------
-function Echoes:BuildGroupTab(container)
-    container:SetLayout("List")
 
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
