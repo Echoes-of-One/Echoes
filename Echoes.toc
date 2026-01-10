@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: Echoes
+## Notes: Playerbot control helper (Ace3 UI)
+## Author: Patchs
+## Version: 1.0
+## SavedVariables: EchoesDB
+## OptionalDeps: Ace3
+
+Echoes.lua
