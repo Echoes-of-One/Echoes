@@ -1009,6 +1009,13 @@ function Echoes:BuildBotTab(container)
 
         rowGroup:SetHeight(22)
     end
+end
+
+------------------------------------------------------------
+-- Group Creation tab (unchanged layout)
+------------------------------------------------------------
+function Echoes:BuildGroupTab(container)
+    container:SetLayout("List")
 
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
