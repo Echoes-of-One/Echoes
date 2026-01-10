@@ -44,7 +44,7 @@ jobs:
           fi
 
           {
-            echo "notes<<'EOF'"
+            echo "notes<<EOF"
             echo "${HEADER}"
             echo
             echo "${NOTES}"
