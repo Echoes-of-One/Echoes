@@ -301,6 +301,56 @@ local function SkinDropdown(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
 
+    local function StripColorCodes(s)
+        if type(s) ~= "string" then return s end
+        s = s:gsub("|c%x%x%x%x%x%x%x%x", "")
+        s = s:gsub("|r", "")
+        return s
+    end
+
+    local function ClassFileFromDisplayName(text)
+        if type(text) ~= "string" then return nil end
+        local t = StripColorCodes(text)
+        t = t:lower()
+        t = t:gsub("%s+", " ")
+        t = t:gsub("^%s+", "")
+        t = t:gsub("%s+$", "")
+
+        if t == "none" or t == "" then return nil end
+        if t == "paladin" or t == "pally" then return "PALADIN" end
+        if t == "death knight" or t == "deathknight" or t == "dk" then return "DEATHKNIGHT" end
+        if t == "warrior" or t == "war" then return "WARRIOR" end
+        if t == "shaman" or t == "sham" then return "SHAMAN" end
+        if t == "hunter" or t == "hunt" then return "HUNTER" end
+        if t == "druid" then return "DRUID" end
+        if t == "rogue" then return "ROGUE" end
+        if t == "priest" then return "PRIEST" end
+        if t == "warlock" or t == "lock" then return "WARLOCK" end
+        if t == "mage" then return "MAGE" end
+        return nil
+    end
+
+    local function ApplyEchoesGroupSlotSelectedColor()
+        if not widget.dropdown or widget.dropdown._EchoesDropdownKind ~= "groupSlot" then return end
+        if widget.dropdown._EchoesForceDisabledGrey then
+            if widget.text and widget.text.SetTextColor then
+                widget.text:SetTextColor(0.55, 0.55, 0.55, 1)
+            end
+            return
+        end
+
+        if widget.text and widget.text.GetText and widget.text.SetTextColor then
+            local classFile = ClassFileFromDisplayName(widget.text:GetText())
+            local colors = rawget(_G, "RAID_CLASS_COLORS")
+            local c = classFile and colors and colors[classFile]
+            if c then
+                widget.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+            else
+                widget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+            end
+        end
+    end
+
     -- AceGUI Dropdown uses UIDropDownMenuTemplate. The visible "box" is actually
     -- widget.dropdown, which AceGUI offsets (-15/+17) to account for Blizzard art.
     -- We remove that art, anchor the dropdown to the frame, and skin the dropdown
@@ -323,6 +373,14 @@ local function SkinDropdown(widget)
         widget.dropdown:ClearAllPoints()
         widget.dropdown:SetPoint("TOPLEFT", f, "TOPLEFT", 0, 0)
         widget.dropdown:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+    end
+
+    -- Some AceGUI builds don't propagate height cleanly; force internal box to match.
+    if widget.dropdown and f.GetHeight and widget.dropdown.SetHeight then
+        local h = f:GetHeight()
+        if h and h > 0 then
+            widget.dropdown:SetHeight(h)
+        end
     end
 
     -- Mark ownership so popup theming can be scoped to Echoes only
@@ -408,6 +466,9 @@ local function SkinDropdown(widget)
             widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- match buttons
         end
     end
+
+    -- Apply class colors to group-slot dropdowns (Echoes-only)
+    ApplyEchoesGroupSlotSelectedColor()
 
     -- Label styling (if a label is used)
     if widget.label and widget.label.SetTextColor then
@@ -647,6 +708,38 @@ local function SkinDropDownListFrame(listFrame)
     listFrame:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
     listFrame:SetBackdropBorderColor(0, 0, 0, 1)
 
+    local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU") or rawget(_G, "UIDROPDOWNMENU_INIT_MENU")
+    local isGroupSlotList = openMenu and openMenu._EchoesDropdownKind == "groupSlot"
+
+    local function StripColorCodes(s)
+        if type(s) ~= "string" then return s end
+        s = s:gsub("|c%x%x%x%x%x%x%x%x", "")
+        s = s:gsub("|r", "")
+        return s
+    end
+
+    local function ClassFileFromDisplayName(text)
+        if type(text) ~= "string" then return nil end
+        local t = StripColorCodes(text)
+        t = t:lower()
+        t = t:gsub("%s+", " ")
+        t = t:gsub("^%s+", "")
+        t = t:gsub("%s+$", "")
+
+        if t == "none" or t == "" then return nil end
+        if t == "paladin" or t == "pally" then return "PALADIN" end
+        if t == "death knight" or t == "deathknight" or t == "dk" then return "DEATHKNIGHT" end
+        if t == "warrior" or t == "war" then return "WARRIOR" end
+        if t == "shaman" or t == "sham" then return "SHAMAN" end
+        if t == "hunter" or t == "hunt" then return "HUNTER" end
+        if t == "druid" then return "DRUID" end
+        if t == "rogue" then return "ROGUE" end
+        if t == "priest" then return "PRIEST" end
+        if t == "warlock" or t == "lock" then return "WARLOCK" end
+        if t == "mage" then return "MAGE" end
+        return nil
+    end
+
     -- Buttons inside the list (only tweak highlight + text colors)
     local maxButtons = rawget(_G, "UIDROPDOWNMENU_MAXBUTTONS") or 32
     if name then
@@ -670,7 +763,18 @@ local function SkinDropDownListFrame(listFrame)
 
                 local text = btn.GetFontString and btn:GetFontString() or btn.normalText
                 if text and text.SetTextColor then
-                    text:SetTextColor(0.90, 0.85, 0.70, 1)
+                    if isGroupSlotList and text.GetText then
+                        local classFile = ClassFileFromDisplayName(text:GetText())
+                        local colors = rawget(_G, "RAID_CLASS_COLORS")
+                        local c = classFile and colors and colors[classFile]
+                        if c then
+                            text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+                        else
+                            text:SetTextColor(0.60, 0.60, 0.60, 1) -- None
+                        end
+                    else
+                        text:SetTextColor(0.90, 0.85, 0.70, 1)
+                    end
                 end
 
                 local check = _G[name .. "Button" .. i .. "Check"]
@@ -722,7 +826,23 @@ end
 
 local function SkinEditBox(widget)
     if not widget or not widget.editbox then return end
-    SkinBackdrop(widget.editbox, 0.6)
+    -- Remove template textures so the edit box matches Echoes theme
+    if widget.editbox.GetRegions then
+        local regs = { widget.editbox:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") then
+                r:SetTexture(nil)
+            end
+        end
+    end
+
+    SkinBackdrop(widget.editbox, 0.95)
+    widget.editbox:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
+    widget.editbox:SetBackdropBorderColor(0, 0, 0, 1)
+
+    if widget.editbox.SetTextColor then
+        widget.editbox:SetTextColor(0.90, 0.85, 0.70, 1)
+    end
 
     if widget.label and widget.label.SetTextColor then
         widget.label:SetTextColor(0.9, 0.9, 0.9, 1)
@@ -831,32 +951,76 @@ local GROUP_TEMPLATES = {
 }
 
 local GROUP_SLOT_OPTIONS = {
-    "none",
-    "pally",
-    "dk",
-    "war",
-    "sham",
-    "hunt",
-    "druid",
-    "rogue",
-    "priest",
-    "lock",
-    "mage",
+    "None",
+    "Paladin",
+    "Death Knight",
+    "Warrior",
+    "Shaman",
+    "Hunter",
+    "Druid",
+    "Rogue",
+    "Priest",
+    "Warlock",
+    "Mage",
 }
 
-local DEFAULT_CYCLE_VALUES = { "none" }
+local DEFAULT_CYCLE_VALUES = {
+    { label = "None", icon = "Interface\\Icons\\INV_Misc_QuestionMark" },
+}
 
+-- Spec icons in WotLK (3.3.5) talent-tab order.
+-- Note: These are the icons shown on the talent tabs, not arbitrary spell icons.
 local CYCLE_VALUES_BY_RIGHT_TEXT = {
-    ["Paladin"]      = { "Prot", "Holy", "Ret" },
-    ["Death Knight"] = { "Blood", "Frost", "Unholy" },
-    ["Warrior"]      = { "Prot", "Arms", "Fury" },
-    ["Shaman"]       = { "Resto", "Enhance", "Ele" },
-    ["Hunter"]       = { "BM", "Surv", "MM" },
-    ["Druid"]        = { "Bear", "Resto", "Cat", "Boomy" },
-    ["Rogue"]        = { "Combat", "Assa", "Sub" },
-    ["Priest"]       = { "Disc", "Holy", "Shadow" },
-    ["Warlock"]      = { "Affl", "Demo", "Destro" },
-    ["Mage"]         = { "Fire", "Arcane", "Frost" },
+    ["Paladin"] = {
+        { label = "Holy",        icon = "Interface\\Icons\\Spell_Holy_HolyGuidance" },
+        { label = "Protection",  icon = "Interface\\Icons\\Spell_Holy_DevotionAura" },
+        { label = "Retribution", icon = "Interface\\Icons\\Spell_Holy_AuraOfLight" },
+    },
+    ["Death Knight"] = {
+        { label = "Blood",  icon = "Interface\\Icons\\Spell_Deathknight_BloodPresence" },
+        { label = "Frost",  icon = "Interface\\Icons\\Spell_Deathknight_FrostPresence" },
+        { label = "Unholy", icon = "Interface\\Icons\\Spell_Deathknight_UnholyPresence" },
+    },
+    ["Warrior"] = {
+        { label = "Arms",       icon = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
+        { label = "Fury",       icon = "Interface\\Icons\\Ability_Warrior_Innerrage" },
+        { label = "Protection", icon = "Interface\\Icons\\Ability_Warrior_DefensiveStance" },
+    },
+    ["Shaman"] = {
+        { label = "Elemental",    icon = "Interface\\Icons\\Spell_Nature_Lightning" },
+        { label = "Enhancement",  icon = "Interface\\Icons\\Spell_Nature_LightningShield" },
+        { label = "Restoration",  icon = "Interface\\Icons\\Spell_Nature_MagicImmunity" },
+    },
+    ["Hunter"] = {
+        { label = "Beast Mastery", icon = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
+        { label = "Marksmanship",  icon = "Interface\\Icons\\Ability_Marksmanship" },
+        { label = "Survival",      icon = "Interface\\Icons\\Ability_Hunter_SwiftStrike" },
+    },
+    ["Druid"] = {
+        { label = "Balance",      icon = "Interface\\Icons\\Spell_Nature_StarFall" },
+        { label = "Feral",        icon = "Interface\\Icons\\Ability_Druid_CatForm" },
+        { label = "Restoration",  icon = "Interface\\Icons\\Spell_Nature_HealingTouch" },
+    },
+    ["Rogue"] = {
+        { label = "Assassination", icon = "Interface\\Icons\\Ability_Rogue_Eviscerate" },
+        { label = "Combat",        icon = "Interface\\Icons\\Ability_BackStab" },
+        { label = "Subtlety",      icon = "Interface\\Icons\\Ability_Stealth" },
+    },
+    ["Priest"] = {
+        { label = "Discipline", icon = "Interface\\Icons\\Spell_Holy_WordFortitude" },
+        { label = "Holy",       icon = "Interface\\Icons\\Spell_Holy_HolyBolt" },
+        { label = "Shadow",     icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain" },
+    },
+    ["Warlock"] = {
+        { label = "Affliction",  icon = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
+        { label = "Demonology",  icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis" },
+        { label = "Destruction", icon = "Interface\\Icons\\Spell_Shadow_RainOfFire" },
+    },
+    ["Mage"] = {
+        { label = "Arcane", icon = "Interface\\Icons\\Spell_Holy_MagicalSentry" },
+        { label = "Fire",   icon = "Interface\\Icons\\Spell_Fire_FireBolt02" },
+        { label = "Frost",  icon = "Interface\\Icons\\Spell_Frost_FrostBolt02" },
+    },
 }
 
 local function GetCycleValuesForRightText(text)
@@ -1353,6 +1517,8 @@ end
 function Echoes:BuildGroupTab(container)
     container:SetLayout("List")
 
+    local INPUT_HEIGHT = 24
+
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
     topGroup:SetLayout("Flow")
@@ -1360,9 +1526,10 @@ function Echoes:BuildGroupTab(container)
     container:AddChild(topGroup)
 
     local nameEdit = AceGUI:Create("EditBox")
-    nameEdit:SetLabel("Template Name")
+    nameEdit:SetLabel("")
     nameEdit:SetText("Text Box")
-    nameEdit:SetWidth(150)
+    nameEdit:SetRelativeWidth(0.40)
+    nameEdit:SetHeight(INPUT_HEIGHT)
     nameEdit:SetCallback("OnEnterPressed", function(widget, event, text)
         if text == "" then
             widget:SetText("Text Box")
@@ -1371,29 +1538,41 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
 
+    local topSpacer = AceGUI:Create("SimpleGroup")
+    topSpacer:SetRelativeWidth(0.02)
+    topSpacer:SetLayout("Flow")
+    topGroup:AddChild(topSpacer)
+
     local templateValues = {}
     for i, v in ipairs(GROUP_TEMPLATES) do
         templateValues[i] = v
     end
 
     local templateDrop = AceGUI:Create("Dropdown")
-    templateDrop:SetLabel("Template")
+    templateDrop:SetLabel("")
     templateDrop:SetList(templateValues)
     templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
-    templateDrop:SetWidth(140)
+    templateDrop:SetRelativeWidth(0.40)
+    templateDrop:SetHeight(INPUT_HEIGHT)
     templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
         EchoesDB.groupTemplateIndex = value
     end)
     topGroup:AddChild(templateDrop)
     SkinDropdown(templateDrop)
 
+    local topSpacer2 = AceGUI:Create("SimpleGroup")
+    topSpacer2:SetRelativeWidth(0.02)
+    topSpacer2:SetLayout("Flow")
+    topGroup:AddChild(topSpacer2)
+
     local saveBtn = AceGUI:Create("Button")
     saveBtn:SetText("Save")
-    saveBtn:SetWidth(80)
+    saveBtn:SetRelativeWidth(0.12)
+    saveBtn:SetHeight(INPUT_HEIGHT)
     saveBtn:SetCallback("OnClick", function()
         Echoes_Print("Group setup saved (stub).")
     end)
-    container:AddChild(saveBtn)
+    topGroup:AddChild(saveBtn)
     SkinButton(saveBtn)
 
     local gridGroup = AceGUI:Create("InlineGroup")
@@ -1403,7 +1582,7 @@ function Echoes:BuildGroupTab(container)
     SkinInlineGroup(gridGroup)
     container:AddChild(gridGroup)
 
-    -- Wrath 25-man raiding: 5 groups of 5.
+    -- Layout groups in a 3x2 grid (3 on first row, 2 on second row)
     local COLUMN_CONFIG = {
         { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 },
     }
@@ -1413,13 +1592,77 @@ function Echoes:BuildGroupTab(container)
         slotValues[i] = v
     end
 
+    local DISPLAY_TO_CLASSFILE = {
+        ["Paladin"] = "PALADIN",
+        ["Death Knight"] = "DEATHKNIGHT",
+        ["Warrior"] = "WARRIOR",
+        ["Shaman"] = "SHAMAN",
+        ["Hunter"] = "HUNTER",
+        ["Druid"] = "DRUID",
+        ["Rogue"] = "ROGUE",
+        ["Priest"] = "PRIEST",
+        ["Warlock"] = "WARLOCK",
+        ["Mage"] = "MAGE",
+    }
+
+    local function ApplyGroupSlotSelectedTextColor(dropdownWidget, value)
+        if not dropdownWidget or not dropdownWidget.text or not dropdownWidget.text.SetTextColor then return end
+        if dropdownWidget.dropdown and dropdownWidget.dropdown._EchoesForceDisabledGrey then
+            dropdownWidget.text:SetTextColor(0.55, 0.55, 0.55, 1)
+            return
+        end
+
+        local display = slotValues[value]
+        if display == "None" or not display then
+            dropdownWidget.text:SetTextColor(0.60, 0.60, 0.60, 1)
+            return
+        end
+
+        local classFile = DISPLAY_TO_CLASSFILE[display]
+        local colors = rawget(_G, "RAID_CLASS_COLORS")
+        local c = classFile and colors and colors[classFile]
+        if c then
+            dropdownWidget.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+        else
+            dropdownWidget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+        end
+    end
+
+    -- Auto-pick player's class for Group 1, Slot 1
+    local playerClassFile = select(2, UnitClass("player"))
+    local classToSlot = {
+        PALADIN      = "Paladin",
+        DEATHKNIGHT  = "Death Knight",
+        WARRIOR      = "Warrior",
+        SHAMAN       = "Shaman",
+        HUNTER       = "Hunter",
+        DRUID        = "Druid",
+        ROGUE        = "Rogue",
+        PRIEST       = "Priest",
+        WARLOCK      = "Warlock",
+        MAGE         = "Mage",
+    }
+    local playerSlotText = playerClassFile and classToSlot[playerClassFile] or nil
+    local playerSlotIndex
+    if playerSlotText then
+        for i = 1, #GROUP_SLOT_OPTIONS do
+            if GROUP_SLOT_OPTIONS[i] == playerSlotText then
+                playerSlotIndex = i
+                break
+            end
+        end
+    end
+
     for colIndex, cfg in ipairs(COLUMN_CONFIG) do
         local col = AceGUI:Create("InlineGroup")
-        col:SetTitle("Group " .. colIndex)
+        col:SetTitle("")
+        if col.titletext and col.titletext.SetText then
+            col.titletext:SetText("")
+            if col.titletext.Hide then col.titletext:Hide() end
+        end
         col:SetLayout("List")
-        -- Slightly under 0.2 to account for Flow spacing/padding so 5 columns don't wrap
-        -- and don't clip against the frame on narrower resolutions.
-        col:SetRelativeWidth(0.185)
+        -- 3 columns per row; Flow will wrap the remaining groups to row 2.
+        col:SetRelativeWidth(0.32)
         SkinInlineGroup(col)
         gridGroup:AddChild(col)
 
@@ -1429,77 +1672,151 @@ function Echoes:BuildGroupTab(container)
             rowGroup:SetLayout("Flow")
             col:AddChild(rowGroup)
 
-            local cycleBtn = AceGUI:Create("Button")
-            cycleBtn:SetRelativeWidth(0.30)
-            cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
-            cycleBtn.index  = 1
+            local isPlayerSlot = (colIndex == 1 and rowIndex == 1 and playerSlotIndex ~= nil)
 
+            local cycleBtn
             local function CycleUpdate(btn)
                 local n = #btn.values
                 if n == 0 then
                     btn:SetText("")
+                    if btn._EchoesIconTex then btn._EchoesIconTex:Hide() end
                     return
                 end
                 if btn.index < 1 or btn.index > n then
                     btn.index = 1
                 end
-                btn:SetText(btn.values[btn.index])
+
+                local item = btn.values[btn.index]
+                local icon = (type(item) == "table") and item.icon or nil
+                local label = (type(item) == "table") and item.label or tostring(item or "")
+
+                btn._EchoesSpecLabel = label
+                btn:SetText("")
+
+                if btn.frame and not btn._EchoesIconTex then
+                    local t = btn.frame:CreateTexture(nil, "ARTWORK")
+                    t:SetPoint("TOPLEFT", btn.frame, "TOPLEFT", 3, -3)
+                    t:SetPoint("BOTTOMRIGHT", btn.frame, "BOTTOMRIGHT", -3, 3)
+                    t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                    btn._EchoesIconTex = t
+
+                    if btn.frame.HookScript then
+                        btn.frame:HookScript("OnEnter", function(self)
+                            if rawget(_G, "GameTooltip") and btn._EchoesSpecLabel and btn._EchoesSpecLabel ~= "" then
+                                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                                GameTooltip:SetText(btn._EchoesSpecLabel, 1, 1, 1)
+                                GameTooltip:Show()
+                            end
+                        end)
+                        btn.frame:HookScript("OnLeave", function()
+                            if rawget(_G, "GameTooltip") then GameTooltip:Hide() end
+                        end)
+                    end
+                end
+
+                if btn._EchoesIconTex then
+                    if icon and btn._EchoesIconTex.SetTexture then
+                        btn._EchoesIconTex:SetTexture(icon)
+                        btn._EchoesIconTex:Show()
+                    else
+                        btn._EchoesIconTex:Hide()
+                    end
+                end
             end
 
-            cycleBtn:SetCallback("OnClick", function(widget, event, button)
-                local btn = widget
-                if not btn.values or #btn.values == 0 then return end
-                if button == "RightButton" then
-                    btn.index = btn.index - 1
-                    if btn.index < 1 then btn.index = #btn.values end
-                else
-                    btn.index = btn.index + 1
-                    if btn.index > #btn.values then btn.index = 1 end
-                end
-                CycleUpdate(btn)
-            end)
-            CycleUpdate(cycleBtn)
-            rowGroup:AddChild(cycleBtn)
-            SkinButton(cycleBtn)
+            if not isPlayerSlot then
+                cycleBtn = AceGUI:Create("Button")
+                cycleBtn:SetRelativeWidth(0.30)
+                cycleBtn:SetHeight(INPUT_HEIGHT)
+                cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+                cycleBtn.index  = 1
+
+                cycleBtn:SetCallback("OnClick", function(widget, event, button)
+                    local btn = widget
+                    if not btn.values or #btn.values == 0 then return end
+                    if button == "RightButton" then
+                        btn.index = btn.index - 1
+                        if btn.index < 1 then btn.index = #btn.values end
+                    else
+                        btn.index = btn.index + 1
+                        if btn.index > #btn.values then btn.index = 1 end
+                    end
+                    CycleUpdate(btn)
+                end)
+
+                CycleUpdate(cycleBtn)
+                rowGroup:AddChild(cycleBtn)
+                SkinButton(cycleBtn)
+            end
 
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
-            dd:SetValue(1)
-            dd:SetRelativeWidth(0.70)
-            dd:SetCallback("OnValueChanged", function(widget, event, value)
-                local text = slotValues[value]
-                local vals = GetCycleValuesForRightText(text)
-                cycleBtn.values = { unpack(vals) }
-                cycleBtn.index  = 1
-                CycleUpdate(cycleBtn)
-            end)
+            dd:SetValue(isPlayerSlot and playerSlotIndex or 1)
+            dd:SetRelativeWidth(isPlayerSlot and 1.0 or 0.70)
+
+            -- Mark these dropdowns so our dropdown popup theming can color class names
+            -- and the selected value can be class-colored/disabled-grey.
+            if dd.dropdown then
+                dd.dropdown._EchoesOwned = true
+                dd.dropdown._EchoesDropdownKind = "groupSlot"
+                if isPlayerSlot then
+                    dd.dropdown._EchoesForceDisabledGrey = true
+                end
+            end
+
+            if not isPlayerSlot then
+                dd:SetCallback("OnValueChanged", function(widget, event, value)
+                    local text = slotValues[value]
+                    local vals = GetCycleValuesForRightText(text)
+                    if cycleBtn then
+                        cycleBtn.values = { unpack(vals) }
+                        cycleBtn.index  = 1
+                        CycleUpdate(cycleBtn)
+                    end
+
+                    ApplyGroupSlotSelectedTextColor(widget, value)
+                end)
+            else
+                if dd.SetDisabled then dd:SetDisabled(true) end
+                if dd.dropdown and dd.dropdown.EnableMouse then dd.dropdown:EnableMouse(false) end
+                if dd.button and dd.button.Disable then dd.button:Disable() end
+            end
+
             rowGroup:AddChild(dd)
             SkinDropdown(dd)
+
+            ApplyGroupSlotSelectedTextColor(dd, isPlayerSlot and playerSlotIndex or 1)
         end
     end
 
-    local bottomGroup = AceGUI:Create("SimpleGroup")
-    bottomGroup:SetFullWidth(true)
-    bottomGroup:SetLayout("Flow")
-    SkinSimpleGroup(bottomGroup)
-    container:AddChild(bottomGroup)
+    -- "Group 6" column: actions (Invite / Set Talents)
+    local actionCol = AceGUI:Create("InlineGroup")
+    actionCol:SetTitle("")
+    if actionCol.titletext and actionCol.titletext.SetText then
+        actionCol.titletext:SetText("")
+        if actionCol.titletext.Hide then actionCol.titletext:Hide() end
+    end
+    actionCol:SetLayout("List")
+    actionCol:SetRelativeWidth(0.32)
+    SkinInlineGroup(actionCol)
+    gridGroup:AddChild(actionCol)
 
     local inviteBtn = AceGUI:Create("Button")
     inviteBtn:SetText("Invite")
-    inviteBtn:SetWidth(120)
+    inviteBtn:SetFullWidth(true)
     inviteBtn:SetCallback("OnClick", function()
         Echoes_Print("Invite clicked (stub).")
     end)
-    bottomGroup:AddChild(inviteBtn)
+    actionCol:AddChild(inviteBtn)
     SkinButton(inviteBtn)
 
     local talentsBtn = AceGUI:Create("Button")
     talentsBtn:SetText("Set Talents")
-    talentsBtn:SetWidth(120)
+    talentsBtn:SetFullWidth(true)
     talentsBtn:SetCallback("OnClick", function()
         Echoes_Print("Set Talents clicked (stub).")
     end)
-    bottomGroup:AddChild(talentsBtn)
+    actionCol:AddChild(talentsBtn)
     SkinButton(talentsBtn)
 end
 
