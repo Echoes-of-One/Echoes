@@ -708,8 +708,7 @@ local function SkinDropDownListFrame(listFrame)
     listFrame:SetBackdropColor(0.06, 0.06, 0.06, 0.98)
     listFrame:SetBackdropBorderColor(0, 0, 0, 1)
 
-    local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU") or rawget(_G, "UIDROPDOWNMENU_INIT_MENU")
-    local isGroupSlotList = openMenu and openMenu._EchoesDropdownKind == "groupSlot"
+    -- Any Echoes-owned dropdown menu can contain class names; color those entries by class.
 
     local function StripColorCodes(s)
         if type(s) ~= "string" then return s end
@@ -763,17 +762,23 @@ local function SkinDropDownListFrame(listFrame)
 
                 local text = btn.GetFontString and btn:GetFontString() or btn.normalText
                 if text and text.SetTextColor then
-                    if isGroupSlotList and text.GetText then
-                        local classFile = ClassFileFromDisplayName(text:GetText())
+                    local label = text.GetText and text:GetText() or nil
+                    local classFile = label and ClassFileFromDisplayName(label) or nil
+                    if classFile then
                         local colors = rawget(_G, "RAID_CLASS_COLORS")
-                        local c = classFile and colors and colors[classFile]
+                        local c = colors and colors[classFile]
                         if c then
                             text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
                         else
-                            text:SetTextColor(0.60, 0.60, 0.60, 1) -- None
+                            text:SetTextColor(0.90, 0.85, 0.70, 1)
                         end
                     else
-                        text:SetTextColor(0.90, 0.85, 0.70, 1)
+                        local stripped = label and StripColorCodes(label) or ""
+                        if stripped:lower() == "none" then
+                            text:SetTextColor(0.60, 0.60, 0.60, 1)
+                        else
+                            text:SetTextColor(0.90, 0.85, 0.70, 1)
+                        end
                     end
                 end
 
@@ -1697,9 +1702,8 @@ function Echoes:BuildGroupTab(container)
 
                 if btn.frame and not btn._EchoesIconTex then
                     local t = btn.frame:CreateTexture(nil, "ARTWORK")
-                    t:SetPoint("TOPLEFT", btn.frame, "TOPLEFT", 3, -3)
-                    t:SetPoint("BOTTOMRIGHT", btn.frame, "BOTTOMRIGHT", -3, 3)
                     t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                    t:SetPoint("LEFT", btn.frame, "LEFT", 4, 0)
                     btn._EchoesIconTex = t
 
                     if btn.frame.HookScript then
@@ -1717,6 +1721,16 @@ function Echoes:BuildGroupTab(container)
                 end
 
                 if btn._EchoesIconTex then
+                    -- Keep the icon square and as tall as the dropdown row.
+                    local h = (btn.frame and btn.frame.GetHeight and btn.frame:GetHeight()) or INPUT_HEIGHT
+                    local size = math.max(8, (h or INPUT_HEIGHT) - 6)
+                    if btn._EchoesIconTex.SetSize then
+                        btn._EchoesIconTex:SetSize(size, size)
+                    else
+                        if btn._EchoesIconTex.SetWidth then btn._EchoesIconTex:SetWidth(size) end
+                        if btn._EchoesIconTex.SetHeight then btn._EchoesIconTex:SetHeight(size) end
+                    end
+
                     if icon and btn._EchoesIconTex.SetTexture then
                         btn._EchoesIconTex:SetTexture(icon)
                         btn._EchoesIconTex:Show()
@@ -1728,7 +1742,7 @@ function Echoes:BuildGroupTab(container)
 
             if not isPlayerSlot then
                 cycleBtn = AceGUI:Create("Button")
-                cycleBtn:SetRelativeWidth(0.30)
+                cycleBtn:SetRelativeWidth(0.12)
                 cycleBtn:SetHeight(INPUT_HEIGHT)
                 cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
                 cycleBtn.index  = 1
@@ -1754,7 +1768,7 @@ function Echoes:BuildGroupTab(container)
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
             dd:SetValue(isPlayerSlot and playerSlotIndex or 1)
-            dd:SetRelativeWidth(isPlayerSlot and 1.0 or 0.70)
+            dd:SetRelativeWidth(isPlayerSlot and 0.68 or 0.58)
 
             -- Mark these dropdowns so our dropdown popup theming can color class names
             -- and the selected value can be class-colored/disabled-grey.
@@ -1788,6 +1802,21 @@ function Echoes:BuildGroupTab(container)
             SkinDropdown(dd)
 
             ApplyGroupSlotSelectedTextColor(dd, isPlayerSlot and playerSlotIndex or 1)
+
+            local nameBtn = AceGUI:Create("Button")
+            nameBtn:SetText("Name")
+            nameBtn:SetRelativeWidth(0.30)
+            nameBtn:SetHeight(INPUT_HEIGHT)
+            nameBtn:SetCallback("OnClick", function()
+                Echoes_Print("Name clicked (stub).")
+            end)
+            rowGroup:AddChild(nameBtn)
+            SkinButton(nameBtn)
+
+            if isPlayerSlot then
+                if nameBtn.SetDisabled then nameBtn:SetDisabled(true) end
+                if nameBtn.frame and nameBtn.frame.EnableMouse then nameBtn.frame:EnableMouse(false) end
+            end
         end
     end
 
