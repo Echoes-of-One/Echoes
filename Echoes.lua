@@ -1080,7 +1080,9 @@ function Echoes:BuildBotTab(container)
         local lab = AceGUI:Create("Label")
         lab:SetText(row.label)
         lab:SetFullWidth(true)
-        lab:SetJustifyH("CENTER")
+        if lab.label and lab.label.SetJustifyH then
+            lab.label:SetJustifyH("CENTER")
+        end
         container:AddChild(lab)
         SkinLabel(lab)
         lab:SetHeight(12)
