@@ -30,7 +30,7 @@ end
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 local FRAME_SIZES = {
     BOT    = { w = 320, h = 470 },
-    GROUP  = { w = 480, h = 520 },
+    GROUP  = { w = 650, h = 520 },
     ECHOES = { w = 320, h = 360 },
 }
 
@@ -687,8 +687,27 @@ function Echoes:ApplyFrameSizeForTab(key)
     local frame = self.UI.frame
     if not frame then return end
     local s = FRAME_SIZES[key] or FRAME_SIZES["BOT"]
-    frame:SetWidth(s.w)
-    frame:SetHeight(s.h)
+
+    -- Constrain to available screen space, accounting for addon UI scale.
+    -- This keeps the window usable across different resolutions.
+    local scale = EchoesDB.uiScale or 1.0
+    if scale < 0.01 then scale = 1.0 end
+
+    local screenW = (GetScreenWidth and GetScreenWidth()) or (UIParent and UIParent.GetWidth and UIParent:GetWidth()) or s.w
+    local screenH = (GetScreenHeight and GetScreenHeight()) or (UIParent and UIParent.GetHeight and UIParent:GetHeight()) or s.h
+
+    -- Margins (in screen pixels) to avoid clipping the window against edges.
+    local marginX, marginY = 120, 160
+    local maxW = (screenW - marginX) / scale
+    local maxH = (screenH - marginY) / scale
+
+    local w = s.w
+    local h = s.h
+    if maxW and maxW > 0 then w = math.min(w, maxW) end
+    if maxH and maxH > 0 then h = math.min(h, maxH) end
+
+    frame:SetWidth(math.floor(w + 0.5))
+    frame:SetHeight(math.floor(h + 0.5))
 end
 
 function Echoes:ApplyScale()
@@ -696,6 +715,9 @@ function Echoes:ApplyScale()
     if widget and widget.frame and widget.frame.SetScale then
         widget.frame:SetScale(EchoesDB.uiScale or 1.0)
     end
+
+    -- Re-apply sizing after scale changes so the current tab still fits.
+    self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
 end
 
 
@@ -1176,9 +1198,9 @@ function Echoes:BuildGroupTab(container)
     SkinInlineGroup(gridGroup)
     container:AddChild(gridGroup)
 
+    -- Wrath 25-man raiding: 5 groups of 5.
     local COLUMN_CONFIG = {
-        { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 },
-        { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 4 },
+        { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 },
     }
 
     local slotValues = {}
@@ -1186,11 +1208,13 @@ function Echoes:BuildGroupTab(container)
         slotValues[i] = v
     end
 
-    for _, cfg in ipairs(COLUMN_CONFIG) do
+    for colIndex, cfg in ipairs(COLUMN_CONFIG) do
         local col = AceGUI:Create("InlineGroup")
-        col:SetTitle("")
+        col:SetTitle("Group " .. colIndex)
         col:SetLayout("List")
-        col:SetWidth(140)
+        -- Slightly under 0.2 to account for Flow spacing/padding so 5 columns don't wrap
+        -- and don't clip against the frame on narrower resolutions.
+        col:SetRelativeWidth(0.185)
         SkinInlineGroup(col)
         gridGroup:AddChild(col)
 
@@ -1201,7 +1225,7 @@ function Echoes:BuildGroupTab(container)
             col:AddChild(rowGroup)
 
             local cycleBtn = AceGUI:Create("Button")
-            cycleBtn:SetWidth(40)
+            cycleBtn:SetRelativeWidth(0.30)
             cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
             cycleBtn.index  = 1
 
@@ -1236,7 +1260,7 @@ function Echoes:BuildGroupTab(container)
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
             dd:SetValue(1)
-            dd:SetWidth(70)
+            dd:SetRelativeWidth(0.70)
             dd:SetCallback("OnValueChanged", function(widget, event, value)
                 local text = slotValues[value]
                 local vals = GetCycleValuesForRightText(text)
