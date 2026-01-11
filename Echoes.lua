@@ -124,8 +124,8 @@ end
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 local FRAME_SIZES = {
     BOT    = { w = 320, h = 470 },
-    -- A bit larger so Group Creation uses more of the pane (and Altbot Name doesn't truncate).
-    GROUP  = { w = 740, h = 520 },
+    -- Wide enough for the 3-column grid + Name button, but not overly tall.
+    GROUP  = { w = 740, h = 440 },
     ECHOES = { w = 320, h = 360 },
 }
 
@@ -2139,12 +2139,32 @@ function Echoes:BuildBotTab(container)
     container:AddChild(classGroup)
 
     -- Inline "Class" label
-    local classLabel = AceGUI:Create("Label")
-    classLabel:SetText("Class")
+    -- NOTE: AceGUI "Label" anchors its FontString to TOPLEFT (justifyV=TOP),
+    -- so it appears vertically misaligned next to a full-height Dropdown.
+    -- Use a SimpleGroup + manually centered FontString instead.
+    local classLabel = AceGUI:Create("SimpleGroup")
     classLabel:SetWidth(50)
     classLabel:SetHeight(ROW_H)
+    classLabel:SetLayout("Fill")
     classGroup:AddChild(classLabel)
-    SkinLabel(classLabel)
+    SkinSimpleGroup(classLabel)
+    if classLabel.frame and classLabel.frame.SetBackdrop then
+        -- Match other inline rows: label should be visually "flat".
+        classLabel.frame:SetBackdropBorderColor(0, 0, 0, 0)
+    end
+    if classLabel.frame and classLabel.frame.CreateFontString then
+        local fs = classLabel.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetText("Class")
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("MIDDLE")
+        fs:SetPoint("LEFT", classLabel.frame, "LEFT", 0, 0)
+        fs:SetPoint("RIGHT", classLabel.frame, "RIGHT", 0, 0)
+        fs:SetPoint("TOP", classLabel.frame, "TOP", 0, 0)
+        fs:SetPoint("BOTTOM", classLabel.frame, "BOTTOM", 0, 0)
+        if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
+        SetEchoesFont(fs, 11, ECHOES_FONT_FLAGS)
+        classLabel._EchoesFontString = fs
+    end
 
     if classLabel.frame and classGroup.frame then
         classLabel.frame:ClearAllPoints()
@@ -2512,7 +2532,8 @@ function Echoes:BuildGroupTab(container)
     local headerPadTop = AceGUI:Create("SimpleGroup")
     headerPadTop:SetFullWidth(true)
     headerPadTop:SetLayout("Flow")
-    headerPadTop:SetHeight(6)
+    -- Keep the top tight so the Group Slots grid sits higher.
+    headerPadTop:SetHeight(0)
     container:AddChild(headerPadTop)
 
     local topGroup = AceGUI:Create("SimpleGroup")
@@ -2949,32 +2970,46 @@ function Echoes:BuildGroupTab(container)
     local headerPadBottom = AceGUI:Create("SimpleGroup")
     headerPadBottom:SetFullWidth(true)
     headerPadBottom:SetLayout("Flow")
-    headerPadBottom:SetHeight(6)
+    -- Keep this tight so the grid starts higher.
+    headerPadBottom:SetHeight(0)
     container:AddChild(headerPadBottom)
 
-    local gridGroup = AceGUI:Create("InlineGroup")
-    gridGroup:SetTitle("Group Slots")
-    gridGroup:SetFullWidth(true)
-    -- Use List here (not Flow). AceGUI's Flow layout applies vertical offset hacks
-    -- that can create a large empty gap before the first row when using full-width children.
-    gridGroup:SetLayout("List")
-    -- No border here so any leftover padding doesn't read as a giant boxed region.
-    SkinInlineGroup(gridGroup, { border = false, alpha = 0.12 })
-    gridGroup:SetHeight((SLOT_GROUP_H * 2) + 34)
-    container:AddChild(gridGroup)
-
-    -- Inner padding + fixed row structure for cleaner alignment.
-    -- Use a SimpleGroup spacer (Label auto-resizes based on font height).
-    local gridPadTop = AceGUI:Create("SimpleGroup")
-    gridPadTop:SetFullWidth(true)
-    gridPadTop:SetLayout("Flow")
-    -- Fixed small top padding so the grid starts near the title (and doesn't inherit
-    -- any pooled height). Keep auto height disabled so the spacer doesn't collapse.
-    if gridPadTop.SetAutoAdjustHeight then
-        gridPadTop:SetAutoAdjustHeight(false)
+    -- Group Slots panel
+    -- Use SimpleGroup instead of InlineGroup to avoid InlineGroup's reserved title space and
+    -- border/content anchoring quirks (which can cause children to appear outside the window).
+    local gridPanel = AceGUI:Create("SimpleGroup")
+    gridPanel:SetFullWidth(true)
+    gridPanel:SetLayout("List")
+    gridPanel.noAutoHeight = true
+    gridPanel:SetHeight((SLOT_GROUP_H * 2) + 26)
+    SkinSimpleGroup(gridPanel)
+    if gridPanel.frame and gridPanel.frame.SetBackdropColor then
+        gridPanel.frame:SetBackdropColor(0.06, 0.06, 0.06, 0.12)
     end
-    gridPadTop:SetHeight(2)
-    gridGroup:AddChild(gridPadTop)
+    container:AddChild(gridPanel)
+
+    local gridTitle = AceGUI:Create("Label")
+    gridTitle:SetText("Group Slots")
+    gridTitle:SetFullWidth(true)
+    gridTitle:SetHeight(16)
+    if gridTitle.label then
+        if gridTitle.label.SetTextColor then
+            gridTitle.label:SetTextColor(1.0, 0.82, 0.0, 1)
+        end
+        SetEchoesFont(gridTitle.label, 12, ECHOES_FONT_FLAGS)
+    end
+    gridPanel:AddChild(gridTitle)
+
+    local gridGroup = AceGUI:Create("SimpleGroup")
+    gridGroup:SetFullWidth(true)
+    gridGroup:SetLayout("List")
+    gridGroup.noAutoHeight = true
+    gridGroup:SetHeight((SLOT_GROUP_H * 2) + 2)
+    SkinSimpleGroup(gridGroup)
+    if gridGroup.frame and gridGroup.frame.SetBackdropColor then
+        gridGroup.frame:SetBackdropColor(0.06, 0.06, 0.06, 0.08)
+    end
+    gridPanel:AddChild(gridGroup)
 
     local gridRow1 = AceGUI:Create("SimpleGroup")
     gridRow1:SetFullWidth(true)
