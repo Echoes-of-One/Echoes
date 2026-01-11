@@ -155,14 +155,19 @@ local function SkinMainFrame(widget)
     f:SetMinResize(w, h)
     f:SetMaxResize(w, h)
     f:SetScript("OnMouseDown", function(self, button)
-        if button == "LeftButton" then
-            self:StartMoving()
+        if button ~= "LeftButton" then return end
+        -- Don't start dragging when clicking our buttons (or any button child).
+        if type(GetMouseFocus) == "function" then
+            local focus = GetMouseFocus()
+            if focus and focus ~= self and focus.IsObjectType and focus:IsObjectType("Button") then
+                return
+            end
         end
+        self:StartMoving()
     end)
     f:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then
-            self:StopMovingOrSizing()
-        end
+        if button ~= "LeftButton" then return end
+        self:StopMovingOrSizing()
     end)
 
     -- Hide AceGUI sizer widgets completely
@@ -293,6 +298,10 @@ local function SkinMainFrame(widget)
         cb._EchoesIsCustomClose = true
         cb:SetSize(90, 22)
         cb:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
+        cb:SetFrameStrata(f:GetFrameStrata() or "MEDIUM")
+        cb:SetFrameLevel((f:GetFrameLevel() or 0) + 500)
+        if cb.SetToplevel then cb:SetToplevel(true) end
+        if cb.RegisterForClicks then cb:RegisterForClicks("AnyUp") end
         SkinBackdrop(cb, 0.9)
 
         local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -313,13 +322,85 @@ local function SkinMainFrame(widget)
         f.EchoesCloseButton = cb
     end
 
+    -- Custom bottom-right Spec button (toggles spec picker for current target)
+    if not f.EchoesSpecButton then
+        local sb = CreateFrame("Button", nil, f)
+        sb._EchoesIsCustomSpec = true
+        sb:SetSize(160, 22)
+        sb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
+        sb:SetFrameStrata(f:GetFrameStrata() or "MEDIUM")
+        sb:SetFrameLevel((f:GetFrameLevel() or 0) + 500)
+        if sb.SetToplevel then sb:SetToplevel(true) end
+        if sb.RegisterForClicks then sb:RegisterForClicks("AnyUp") end
+        SkinBackdrop(sb, 0.9)
+
+        local fs = sb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        fs:SetPoint("CENTER")
+        fs:SetJustifyH("CENTER")
+        fs:SetText("Toggle Spec Panel")
+        fs:SetTextColor(0.9, 0.8, 0.5, 1)
+        local font, size, flags = fs:GetFont()
+        fs:SetFont(font, math.max(10, (size or 12)), "OUTLINE")
+
+        sb:HookScript("OnEnter", function(self)
+            self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
+        end)
+        sb:HookScript("OnLeave", function(self)
+            self:SetBackdropColor(0.06, 0.06, 0.06, 0.9)
+        end)
+        sb:SetScript("OnClick", function()
+            if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+                if rawget(_G, "DEFAULT_CHAT_FRAME") and DEFAULT_CHAT_FRAME.AddMessage then
+                    DEFAULT_CHAT_FRAME:AddMessage("Echoes: Toggle Spec Panel clicked")
+                end
+            end
+
+            local ok, err = pcall(function()
+                Echoes:ToggleSpecWhisperFrame(f)
+            end)
+            if not ok and rawget(_G, "DEFAULT_CHAT_FRAME") and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage("Echoes: Spec Panel error: " .. tostring(err))
+            end
+        end)
+
+        f.EchoesSpecButton = sb
+    end
+
+    -- Re-assert button draw order in case AceGUI changes frame levels later.
+    do
+        local baseLevel = (f.GetFrameLevel and f:GetFrameLevel()) or 0
+        local baseStrata = (f.GetFrameStrata and f:GetFrameStrata()) or "MEDIUM"
+        if f.EchoesCloseButton then
+            if f.EchoesCloseButton.GetParent and f.EchoesCloseButton:GetParent() ~= f and f.EchoesCloseButton.SetParent then
+                f.EchoesCloseButton:SetParent(f)
+                f.EchoesCloseButton:ClearAllPoints()
+                f.EchoesCloseButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
+            end
+            if f.EchoesCloseButton.SetFrameStrata then f.EchoesCloseButton:SetFrameStrata(baseStrata) end
+            if f.EchoesCloseButton.SetFrameLevel then f.EchoesCloseButton:SetFrameLevel(baseLevel + 500) end
+            if f.EchoesCloseButton.SetToplevel then f.EchoesCloseButton:SetToplevel(true) end
+            if f.EchoesCloseButton.EnableMouse then f.EchoesCloseButton:EnableMouse(true) end
+        end
+        if f.EchoesSpecButton then
+            if f.EchoesSpecButton.GetParent and f.EchoesSpecButton:GetParent() ~= f and f.EchoesSpecButton.SetParent then
+                f.EchoesSpecButton:SetParent(f)
+                f.EchoesSpecButton:ClearAllPoints()
+                f.EchoesSpecButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
+            end
+            if f.EchoesSpecButton.SetFrameStrata then f.EchoesSpecButton:SetFrameStrata(baseStrata) end
+            if f.EchoesSpecButton.SetFrameLevel then f.EchoesSpecButton:SetFrameLevel(baseLevel + 500) end
+            if f.EchoesSpecButton.SetToplevel then f.EchoesSpecButton:SetToplevel(true) end
+            if f.EchoesSpecButton.EnableMouse then f.EchoesSpecButton:EnableMouse(true) end
+        end
+    end
+
     ------------------------------------------------
     -- Kill any remaining bottom-left "status"/resize artifacts
     ------------------------------------------------
     if f.GetChildren then
         local children = { f:GetChildren() }
         for _, child in ipairs(children) do
-            if child and child.IsObjectType and child:IsObjectType("Frame") and child ~= f.EchoesTitleBar and child ~= f.EchoesCloseButton then
+            if child and child.IsObjectType and child:IsObjectType("Frame") and child ~= f.EchoesTitleBar and child ~= f.EchoesCloseButton and child ~= f.EchoesSpecButton then
                 local p = child.GetPoint and child:GetPoint(1)
                 if p then
                     local point, relTo = child:GetPoint(1)
@@ -331,6 +412,265 @@ local function SkinMainFrame(widget)
                     end
                 end
             end
+        end
+    end
+end
+
+------------------------------------------------------------
+-- Target Spec Whisper frame (toggleable + movable)
+------------------------------------------------------------
+
+local ECHOES_TARGET_SPEC_OPTIONS = {
+    WARRIOR = {
+        { spec = "prot", icon = "Interface\\Icons\\Ability_Warrior_DefensiveStance" },
+        { spec = "arms", icon = "Interface\\Icons\\Ability_Warrior_SavageBlow" },
+        { spec = "fury", icon = "Interface\\Icons\\Ability_Warrior_BattleShout" },
+    },
+    PALADIN = {
+        { spec = "prot", icon = "Interface\\Icons\\Spell_Holy_DevotionAura" },
+        { spec = "holy", icon = "Interface\\Icons\\Spell_Holy_HolyBolt" },
+        { spec = "ret",  icon = "Interface\\Icons\\Spell_Holy_AuraOfLight" },
+    },
+    DEATHKNIGHT = {
+        { spec = "blood",  icon = "Interface\\Icons\\Spell_Deathknight_BloodPresence" },
+        { spec = "frost",  icon = "Interface\\Icons\\Spell_Deathknight_FrostPresence" },
+        { spec = "unholy", icon = "Interface\\Icons\\Spell_Deathknight_UnholyPresence" },
+    },
+    HUNTER = {
+        { spec = "bm", icon = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
+        { spec = "mm", icon = "Interface\\Icons\\Ability_Marksmanship" },
+        { spec = "sv", icon = "Interface\\Icons\\Ability_Hunter_SwiftStrike" },
+    },
+    ROGUE = {
+        { spec = "ass",    icon = "Interface\\Icons\\Ability_Rogue_Eviscerate" },
+        { spec = "combat", icon = "Interface\\Icons\\Ability_BackStab" },
+        { spec = "sub",    icon = "Interface\\Icons\\Ability_Stealth" },
+    },
+    PRIEST = {
+        { spec = "disc",   icon = "Interface\\Icons\\Spell_Holy_PowerWordShield" },
+        { spec = "holy",   icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit" },
+        { spec = "shadow", icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain" },
+    },
+    SHAMAN = {
+        { spec = "ele",   icon = "Interface\\Icons\\Spell_Nature_Lightning" },
+        { spec = "enh",   icon = "Interface\\Icons\\Spell_Nature_LightningShield" },
+        { spec = "resto", icon = "Interface\\Icons\\Spell_Nature_HealingWaveGreater" },
+    },
+    MAGE = {
+        { spec = "arcane", icon = "Interface\\Icons\\Spell_Nature_StarFall" },
+        { spec = "fire",   icon = "Interface\\Icons\\Spell_Fire_FlameBolt" },
+        { spec = "frost",  icon = "Interface\\Icons\\Spell_Frost_FrostBolt02" },
+        { spec = "frostfire", icon = "Interface\\Icons\\Ability_Mage_FrostFireBolt" },
+    },
+    WARLOCK = {
+        { spec = "aff",    icon = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
+        { spec = "demo",   icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis" },
+        { spec = "destro", icon = "Interface\\Icons\\Spell_Shadow_RainOfFire" },
+    },
+    DRUID = {
+        { spec = "bear",    icon = "Interface\\Icons\\Ability_Racial_BearForm" },
+        { spec = "cat",     icon = "Interface\\Icons\\Ability_Druid_CatForm" },
+        { spec = "balance", icon = "Interface\\Icons\\Spell_Nature_StarFall" },
+        { spec = "resto",   icon = "Interface\\Icons\\Spell_Nature_HealingTouch" },
+    },
+}
+
+function Echoes:EnsureSpecWhisperFrame(anchorFrame)
+    self.UI = self.UI or {}
+    if self.UI.specWhisperFrame and self.UI.specWhisperFrame._EchoesIsSpecFrame then
+        return self.UI.specWhisperFrame
+    end
+
+    local f = CreateFrame("Frame", nil, UIParent)
+    f._EchoesIsSpecFrame = true
+    f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
+    f:SetMovable(true)
+    f:EnableMouse(true)
+    if f.RegisterForDrag then f:RegisterForDrag("LeftButton") end
+    f:SetScript("OnDragStart", function(self)
+        if self.StartMoving then self:StartMoving() end
+    end)
+    f:SetScript("OnDragStop", function(self)
+        if self.StopMovingOrSizing then self:StopMovingOrSizing() end
+    end)
+
+    SkinBackdrop(f, 0.92)
+
+    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", f, "TOP", 0, -6)
+    title:SetTextColor(0.9, 0.8, 0.5, 1)
+    title:SetText("Spec Panel")
+    f._EchoesTitle = title
+
+    local noTargetLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    noTargetLabel:SetPoint("CENTER", f, "CENTER", 0, -2)
+    noTargetLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+    noTargetLabel:SetText("<no target>")
+    f._EchoesNoTargetLabel = noTargetLabel
+
+    local buttons = {}
+    local BTN = 30
+    local GAP = 6
+
+    local function MakeIconButton(i)
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(BTN, BTN)
+        SkinBackdrop(b, 0.85)
+
+        local t = b:CreateTexture(nil, "ARTWORK")
+        t:SetPoint("CENTER")
+        t:SetSize(BTN - 6, BTN - 6)
+        t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+        b._EchoesIcon = t
+
+        b:SetScript("OnEnter", function(self)
+            if rawget(_G, "GameTooltip") and self._EchoesSpecKey and self._EchoesSpecKey ~= "" then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Spec: " .. tostring(self._EchoesSpecKey), 1, 1, 1)
+                GameTooltip:Show()
+            end
+        end)
+        b:SetScript("OnLeave", function()
+            if rawget(_G, "GameTooltip") then GameTooltip:Hide() end
+        end)
+
+        b:SetScript("OnClick", function(self)
+            local spec = self._EchoesSpecKey
+            if not spec or spec == "" then return end
+            if type(UnitName) ~= "function" then return end
+            local targetName = UnitName("target")
+            if not targetName or targetName == "" then
+                if rawget(_G, "DEFAULT_CHAT_FRAME") and DEFAULT_CHAT_FRAME.AddMessage then
+                    DEFAULT_CHAT_FRAME:AddMessage("Echoes: Spec: no target selected.")
+                end
+                return
+            end
+            if type(SendChatMessage) ~= "function" then return end
+            local msg = "talents spec " .. tostring(spec) .. " pve"
+            SendChatMessage(msg, "WHISPER", nil, targetName)
+        end)
+
+        buttons[i] = b
+        return b
+    end
+
+    for i = 1, 4 do
+        MakeIconButton(i):Hide()
+    end
+
+    local function PositionButtons(count)
+        count = tonumber(count) or 0
+        if count < 1 then
+            f:SetSize(160, 56)
+            for i = 1, 4 do
+                buttons[i]:Hide()
+            end
+            return
+        end
+
+        local width = 12 + (count * BTN) + ((count - 1) * GAP) + 12
+        local height = 10 + 18 + 8 + BTN + 10
+        f:SetSize(width, height)
+
+        local startX = (width - ((count * BTN) + ((count - 1) * GAP))) / 2
+        for i = 1, 4 do
+            local b = buttons[i]
+            b:ClearAllPoints()
+            if i <= count then
+                b:SetPoint("TOPLEFT", f, "TOPLEFT", startX + ((i - 1) * (BTN + GAP)), -28)
+                b:Show()
+            else
+                b:Hide()
+            end
+        end
+    end
+
+    function f:_EchoesUpdateForTarget()
+        local unit = "target"
+        local targetName = (type(UnitName) == "function") and UnitName(unit) or nil
+        local classFile
+        if type(UnitClass) == "function" then
+            local _, cf = UnitClass(unit)
+            classFile = cf
+        end
+
+        if not targetName or targetName == "" or not classFile or classFile == "" then
+            if f._EchoesNoTargetLabel then
+                f._EchoesNoTargetLabel:SetText("<no target>")
+                f._EchoesNoTargetLabel:Show()
+            end
+            PositionButtons(0)
+            return
+        end
+
+        if f._EchoesNoTargetLabel then
+            f._EchoesNoTargetLabel:Hide()
+        end
+
+        local opts = ECHOES_TARGET_SPEC_OPTIONS[classFile]
+        if not opts then
+            if f._EchoesNoTargetLabel then
+                f._EchoesNoTargetLabel:SetText("<no specs>")
+                f._EchoesNoTargetLabel:Show()
+            end
+            PositionButtons(0)
+            return
+        end
+
+        local count = math.min(4, #opts)
+        PositionButtons(count)
+
+        for i = 1, count do
+            local opt = opts[i]
+            local b = buttons[i]
+            b._EchoesSpecKey = opt.spec
+            if b._EchoesIcon and b._EchoesIcon.SetTexture then
+                b._EchoesIcon:SetTexture(opt.icon)
+            end
+        end
+    end
+
+    f:RegisterEvent("PLAYER_TARGET_CHANGED")
+    f:SetScript("OnEvent", function(self)
+        self:_EchoesUpdateForTarget()
+    end)
+    f:SetScript("OnShow", function(self)
+        self:_EchoesUpdateForTarget()
+    end)
+
+    -- Initial position: outside TOPLEFT of the main frame.
+    f:ClearAllPoints()
+    if anchorFrame and anchorFrame.GetPoint then
+        -- Place the panel just to the left of the main frame, aligned at the top.
+        f:SetPoint("TOPRIGHT", anchorFrame, "TOPLEFT", -8, 0)
+    else
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+
+    -- IMPORTANT: CreateFrame defaults to "shown". If we leave it shown here,
+    -- the first toggle click after /reload will hide it, requiring a second click.
+    -- Start hidden so the first click always opens it.
+    f:Hide()
+
+    self.UI.specWhisperFrame = f
+    return f
+end
+
+function Echoes:ToggleSpecWhisperFrame(anchorFrame)
+    local f = self:EnsureSpecWhisperFrame(anchorFrame)
+    if not f then return end
+    if f.IsShown and f:IsShown() then
+        f:Hide()
+    else
+        -- Re-anchor outside TOPLEFT of the main frame each time so it doesn't "disappear".
+        if anchorFrame and anchorFrame.GetPoint then
+            f:ClearAllPoints()
+            f:SetPoint("TOPRIGHT", anchorFrame, "TOPLEFT", -8, 0)
+        end
+        f:Show()
+        if f._EchoesUpdateForTarget then
+            f:_EchoesUpdateForTarget()
         end
     end
 end
@@ -1073,7 +1413,7 @@ end
 
 local CMD = {
     ADD_CLASS   = ".playerbots bot addclass",
-    REMOVE_ALL  = "logout",
+    REMOVE_ALL  = "leave",
 
     TANK_ATTACK = "@tank attack",
     ATTACK      = "@attack",
@@ -1789,7 +2129,33 @@ function Echoes:BuildBotTab(container)
     addBtn:SetHeight(ROW_H)
     addBtn:SetCallback("OnClick", function()
         local c = GetSelectedClass()
+
+        -- Track bots that whisper "Hello!" after we add them.
+        self._EchoesBotAddSessionActive = true
+        self._EchoesBotAddHelloFrom = {}
+        self._EchoesBotAddSessionId = (tonumber(self._EchoesBotAddSessionId) or 0) + 1
+        local sessionId = self._EchoesBotAddSessionId
+
         SendChatMessage(".playerbots bot addclass " .. c.cmd, "GUILD")
+
+        -- If "Hello" bots aren't in group after 10s, re-attempt invites.
+        self:RunAfter(10.0, function()
+            if sessionId ~= self._EchoesBotAddSessionId then return end
+            self._EchoesBotAddSessionActive = false
+
+            local helloFrom = self._EchoesBotAddHelloFrom or {}
+            local missing = {}
+            for name, _ in pairs(helloFrom) do
+                if name and name ~= "" and (not Echoes_IsNameInGroup(name)) then
+                    missing[#missing + 1] = { kind = "invite", name = name }
+                end
+            end
+
+            if #missing > 0 then
+                Echoes_Print("Re-inviting missing Hello bots...")
+                self:RunActionQueue(missing, 0.70)
+            end
+        end)
     end)
     addRemGroup:AddChild(addBtn)
     SkinButton(addBtn)
@@ -2111,6 +2477,13 @@ function Echoes:BuildGroupTab(container)
     local slotValues = {}
     local ALTBOT_INDEX
 
+    local function NormalizeAltbotName(name)
+        name = tostring(name or "")
+        name = name:gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then return nil end
+        return string.upper(name:sub(1, 1)) .. name:sub(2)
+    end
+
     local function ClearEmptySlot(slot)
         if not slot or slot._EchoesMember then return end
 
@@ -2197,7 +2570,7 @@ function Echoes:BuildGroupTab(container)
                         slot.classDrop:SetValue(desiredIndex)
                         slot.classDrop._EchoesSelectedValue = desiredIndex
                         if desiredIndex == ALTBOT_INDEX then
-                            slot.classDrop._EchoesAltbotName = (entry.altName and tostring(entry.altName)) or nil
+                            slot.classDrop._EchoesAltbotName = NormalizeAltbotName(entry.altName)
                         else
                             slot.classDrop._EchoesAltbotName = nil
                         end
@@ -2273,11 +2646,7 @@ function Echoes:BuildGroupTab(container)
                         local classText = slotValues[value] or "None"
                         if classText ~= "None" then
                             local altName = dd._EchoesAltbotName
-                            if altName then
-                                altName = tostring(altName or "")
-                                altName = altName:gsub("^%s+", ""):gsub("%s+$", "")
-                                if altName == "" then altName = nil end
-                            end
+                            altName = NormalizeAltbotName(altName)
 
                             local specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil
                             if specLabel == "None" then specLabel = nil end
@@ -2716,13 +3085,7 @@ function Echoes:BuildGroupTab(container)
                         title = "Custom Character",
                         initialText = initialText,
                         onAccept = function(text)
-                            text = tostring(text or "")
-                            text = text:gsub("^%s+", ""):gsub("%s+$", "")
-                            if text == "" then
-                                dd._EchoesAltbotName = nil
-                            else
-                                dd._EchoesAltbotName = text
-                            end
+                            dd._EchoesAltbotName = NormalizeAltbotName(text)
 
                             dd._EchoesSuppress = true
                             dd:SetValue(ALTBOT_INDEX)
@@ -2780,8 +3143,71 @@ function Echoes:BuildGroupTab(container)
     local inviteBtn = AceGUI:Create("Button")
     inviteBtn:SetText("Invite")
     inviteBtn:SetFullWidth(true)
-    inviteBtn:SetCallback("OnClick", function()
+    local function InviteClick()
         if not self.UI or not self.UI.groupSlots then return end
+
+        local function IsInRaidNow()
+            return (type(GetNumRaidMembers) == "function") and ((GetNumRaidMembers() or 0) > 0)
+        end
+
+        local function CanReorderRaid()
+            if type(IsRaidLeader) == "function" and IsRaidLeader() then return true end
+            if type(IsRaidOfficer) == "function" and IsRaidOfficer() then return true end
+            return false
+        end
+
+        local function CompressRaidToFront()
+            if not IsInRaidNow() then return false end
+            if not CanReorderRaid() then return false end
+            if type(GetRaidRosterInfo) ~= "function" or type(SetRaidSubgroup) ~= "function" then return false end
+
+            local n = GetNumRaidMembers() or 0
+            if n <= 0 then return false end
+
+            local roster = {}
+            for i = 1, n do
+                local name, _, subgroup = GetRaidRosterInfo(i)
+                name = Echoes_NormalizeName(name)
+                subgroup = tonumber(subgroup) or 1
+                if name and name ~= "" then
+                    roster[#roster + 1] = { name = name, subgroup = subgroup, idx = i }
+                end
+            end
+
+            table.sort(roster, function(a, b)
+                if a.subgroup == b.subgroup then
+                    return (a.idx or 0) < (b.idx or 0)
+                end
+                return (a.subgroup or 0) < (b.subgroup or 0)
+            end)
+
+            local needsMove = false
+            for newIndex, m in ipairs(roster) do
+                local newGroup = math.floor((newIndex - 1) / 5) + 1
+                if m.subgroup ~= newGroup then
+                    needsMove = true
+                    pcall(SetRaidSubgroup, m.name, newGroup)
+                end
+            end
+
+            return needsMove
+        end
+
+        -- Always compress raid subgroups before inviting so we minimize used groups.
+        -- This avoids gaps (e.g., Group 3 occupied while Group 2 empty) causing over-invites.
+        if CompressRaidToFront() then
+            if not self._EchoesInviteDeferredAfterCompress then
+                self._EchoesInviteDeferredAfterCompress = true
+                self:RunAfter(0.8, function()
+                    self._EchoesInviteDeferredAfterCompress = false
+                    if self.UpdateGroupCreationFromRoster then
+                        self:UpdateGroupCreationFromRoster(true)
+                    end
+                    InviteClick()
+                end)
+            end
+            return
+        end
 
         local displayToCmd = {
             ["Paladin"] = "paladin",
@@ -2817,6 +3243,161 @@ function Echoes:BuildGroupTab(container)
             return nil
         end
 
+        -- When inviting, we want Groups 1..5 to be filled in order.
+        -- If the user configured Group 3/4/5 while a prior group is empty, shift those groups left.
+        local function SlotHasConfiguredClass(slot)
+            if not slot or not slot.classDrop then return false end
+            if (slot._EchoesMember and slot._EchoesMember.isPlayer) or (slot.cycleBtn and slot.cycleBtn._EchoesLocked) then
+                return false
+            end
+            local dd = slot.classDrop
+            local value = dd._EchoesSelectedValue or dd.value or 1
+            local classText = slotValues[value]
+            return (classText ~= nil) and (classText ~= "None")
+        end
+
+        local function GroupHasMembers(g)
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot and slot._EchoesMember then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local function GroupIsEmptyConfig(g)
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if SlotHasConfiguredClass(slot) then
+                    return false
+                end
+            end
+            return true
+        end
+
+        local function SetSlotConfig(slot, valueIndex, specLabel, altbotName)
+            if not slot or not slot.classDrop then return end
+            if slot._EchoesMember then return end
+            if (slot.cycleBtn and slot.cycleBtn._EchoesLocked) then return end
+
+            local dd = slot.classDrop
+            valueIndex = tonumber(valueIndex) or 1
+
+            if valueIndex ~= ALTBOT_INDEX then
+                dd._EchoesAltbotName = nil
+            else
+                dd._EchoesAltbotName = NormalizeAltbotName(altbotName)
+            end
+
+            dd:SetValue(valueIndex)
+            dd._EchoesSelectedValue = valueIndex
+            if dd._EchoesUpdateNameButtonVisibility then
+                dd._EchoesUpdateNameButtonVisibility(valueIndex)
+            end
+            if self.UI and self.UI._GroupSlotApplyColor then
+                self.UI._GroupSlotApplyColor(dd, valueIndex)
+            end
+
+            if specLabel and specLabel ~= "" and slot.cycleBtn and slot.cycleBtn.values and slot.cycleBtn._EchoesCycleUpdate then
+                local desired = tostring(specLabel)
+                for i, item in ipairs(slot.cycleBtn.values) do
+                    local label = (type(item) == "table") and item.label or tostring(item or "")
+                    if label == desired then
+                        slot.cycleBtn.index = i
+                        slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn)
+                        break
+                    end
+                end
+            end
+        end
+
+        local function ReadSlotConfig(slot)
+            if not slot or not slot.classDrop then
+                return { valueIndex = 1, specLabel = "", altbotName = nil }
+            end
+            local dd = slot.classDrop
+            local valueIndex = dd._EchoesSelectedValue or dd.value or 1
+            local specLabel = (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
+            local altbotName = dd._EchoesAltbotName
+            return { valueIndex = valueIndex, specLabel = specLabel, altbotName = altbotName }
+        end
+
+        local function SlotIsMovable(slot)
+            if not slot or not slot.classDrop then return false end
+            if slot._EchoesMember then return false end
+            if (slot._EchoesMember and slot._EchoesMember.isPlayer) then return false end
+            if (slot.cycleBtn and slot.cycleBtn._EchoesLocked) then return false end
+            return true
+        end
+
+        local function CompactInvitePlanToFront()
+            -- Pack configured slots into the earliest available movable slots (including Group 1),
+            -- so gaps like Group 1 + Group 3 collapse into Group 1 + Group 2, and partial Group 1 fills first.
+            local sources = {}
+
+            for g = 1, 5 do
+                for p = 1, 5 do
+                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                    if SlotIsMovable(slot) and SlotHasConfiguredClass(slot) then
+                        sources[#sources + 1] = ReadSlotConfig(slot)
+                    end
+                end
+            end
+
+            if #sources == 0 then return end
+
+            -- Clear all movable configured slots first.
+            for g = 1, 5 do
+                for p = 1, 5 do
+                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                    if SlotIsMovable(slot) and SlotHasConfiguredClass(slot) then
+                        SetSlotConfig(slot, 1, "", nil)
+                    end
+                end
+            end
+
+            -- Refill into earliest movable slots.
+            local i = 1
+            for g = 1, 5 do
+                for p = 1, 5 do
+                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                    if SlotIsMovable(slot) then
+                        local cfg = sources[i]
+                        if not cfg then
+                            return
+                        end
+                        SetSlotConfig(slot, cfg.valueIndex, cfg.specLabel, cfg.altbotName)
+                        i = i + 1
+                    end
+                end
+            end
+        end
+
+        CompactInvitePlanToFront()
+
+        local function GroupHasAnyConfigured(g)
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if SlotHasConfiguredClass(slot) then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local maxGroupToInvite = 0
+        for g = 1, 5 do
+            if GroupHasAnyConfigured(g) or GroupHasMembers(g) then
+                maxGroupToInvite = g
+            end
+        end
+
+        if maxGroupToInvite <= 0 then
+            Echoes_Print("Nothing to invite.")
+            return
+        end
+
         -- Invite session: track bot "Hello!" whispers and named bots we asked for.
         self._EchoesInviteSessionActive = true
         self._EchoesInviteHelloFrom = {}
@@ -2824,7 +3405,7 @@ function Echoes:BuildGroupTab(container)
 
         -- Decide whether this preset is bigger than a 5-man and needs raid conversion.
         local configuredCount = 0
-        for g = 1, 5 do
+        for g = 1, maxGroupToInvite do
             for p = 1, 5 do
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
                 if slot and slot.classDrop then
@@ -2847,7 +3428,7 @@ function Echoes:BuildGroupTab(container)
 
         local actions = {}
         local seenAddByName = {}
-        for g = 1, 5 do
+        for g = 1, maxGroupToInvite do
             self._EchoesPlannedTalentByPos[g] = {}
             for p = 1, 5 do
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
@@ -2924,14 +3505,66 @@ function Echoes:BuildGroupTab(container)
             end
         end
 
+        -- Clear any planned data beyond the contiguous invite range to avoid stale plans.
+        for g = maxGroupToInvite + 1, 5 do
+            self._EchoesPlannedTalentByPos[g] = nil
+        end
+
         if #actions == 0 then
             Echoes_Print("Nothing to invite.")
             return
         end
 
-        Echoes_Print("Inviting...")
-        -- Requirement: never run invite commands faster than every 0.7s.
-        self:RunActionQueue(actions, 0.70, function()
+        local function IsInRaid()
+            return (type(GetNumRaidMembers) == "function") and ((GetNumRaidMembers() or 0) > 0)
+        end
+
+        local function PartyMemberCount()
+            return (type(GetNumPartyMembers) == "function") and (GetNumPartyMembers() or 0) or 0
+        end
+
+        local function CurrentGroupSize()
+            if IsInRaid() then
+                return (type(GetNumRaidMembers) == "function") and (GetNumRaidMembers() or 0) or 0
+            end
+            local nParty = PartyMemberCount()
+            if nParty > 0 then
+                return nParty + 1
+            end
+            return 1
+        end
+
+        local function EnsureRaidIfWouldExceed5(extraMembers)
+            extraMembers = tonumber(extraMembers) or 0
+            if extraMembers <= 0 then return false end
+            if IsInRaid() then return false end
+
+            if (CurrentGroupSize() + extraMembers) <= 5 then
+                return false
+            end
+
+            -- We can only ConvertToRaid once we're actually in a party.
+            local nParty = PartyMemberCount()
+            if nParty <= 0 then
+                -- Best-effort: remember we need a raid as soon as we have a party member.
+                self._EchoesInviteNeedsRaid = true
+                return false
+            end
+
+            if type(ConvertToRaid) ~= "function" then return false end
+            local now = (type(GetTime) == "function" and GetTime()) or 0
+            if not self._EchoesLastConvertToRaid or (now - self._EchoesLastConvertToRaid) > 1.0 then
+                self._EchoesLastConvertToRaid = now
+                ConvertToRaid()
+                return true
+            end
+            return false
+        end
+
+        local function StartInviteRun()
+            Echoes_Print("Inviting...")
+            -- Requirement: never run invite commands faster than every 0.7s.
+            self:RunActionQueue(actions, 0.70, function()
             -- Give whispers/roster a moment to land, then invite any missing bots by name.
             self:RunAfter(1.2, function()
                 local missing = {}
@@ -2958,13 +3591,34 @@ function Echoes:BuildGroupTab(container)
                 end
 
                 if #missing > 0 then
+                    -- If the remaining missing members would push us past 5, ensure we're a raid BEFORE inviting.
+                    local converted = EnsureRaidIfWouldExceed5(#missing)
                     Echoes_Print("Inviting missing bots...")
-                    self:RunActionQueue(missing, 0.70)
+                    if converted then
+                        self:RunAfter(0.8, function()
+                            self:RunActionQueue(missing, 0.70)
+                        end)
+                    else
+                        self:RunActionQueue(missing, 0.70)
+                    end
                 end
 
                 self._EchoesInviteSessionActive = false
             end)
         end)
+        end
+
+        -- If this invite run would exceed party size, convert to raid up front (when possible).
+        local converted = EnsureRaidIfWouldExceed5(#actions)
+        if converted then
+            self:RunAfter(0.8, StartInviteRun)
+        else
+            StartInviteRun()
+        end
+    end
+
+    inviteBtn:SetCallback("OnClick", function()
+        InviteClick()
     end)
     actionCol:AddChild(inviteBtn)
     SkinButton(inviteBtn)
@@ -3054,7 +3708,7 @@ function Echoes:BuildGroupTab(container)
     SkinButton(talentsBtn)
 
     local maintBtn = AceGUI:Create("Button")
-    maintBtn:SetText("Maintenance / Autogear")
+    maintBtn:SetText("Autogear")
     maintBtn:SetFullWidth(true)
     maintBtn:SetCallback("OnClick", function()
         local inRaid = (type(GetNumRaidMembers) == "function" and (GetNumRaidMembers() or 0) > 0)
@@ -3068,7 +3722,49 @@ function Echoes:BuildGroupTab(container)
 
         if type(SendChatMessage) == "function" then
             SendChatMessage("maintenance", ch)
-            self:RunAfter(5.0, function()
+
+            -- After 2s, whisper "summon" to each party/raid member.
+            self:RunAfter(2.0, function()
+                if type(SendChatMessage) ~= "function" then return end
+                local sent = {}
+
+                if type(UnitName) == "function" then
+                    local me = Echoes_NormalizeName(UnitName("player"))
+                    if me ~= "" then sent[me:lower()] = true end
+                end
+
+                if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
+                    local n = GetNumRaidMembers() or 0
+                    if n > 0 then
+                        for i = 1, n do
+                            local rn = GetRaidRosterInfo(i)
+                            rn = Echoes_NormalizeName(rn)
+                            local key = rn:lower()
+                            if rn ~= "" and not sent[key] then
+                                sent[key] = true
+                                SendChatMessage("summon", "WHISPER", nil, rn)
+                            end
+                        end
+                        return
+                    end
+                end
+
+                if type(GetNumPartyMembers) == "function" and type(UnitName) == "function" then
+                    local nParty = GetNumPartyMembers() or 0
+                    for i = 1, math.min(4, nParty) do
+                        local pn = UnitName("party" .. i)
+                        pn = Echoes_NormalizeName(pn)
+                        local key = pn:lower()
+                        if pn ~= "" and not sent[key] then
+                            sent[key] = true
+                            SendChatMessage("summon", "WHISPER", nil, pn)
+                        end
+                    end
+                end
+            end)
+
+            -- After another 2s, send autogear.
+            self:RunAfter(4.0, function()
                 SendChatMessage("autogear", ch)
             end)
         end
@@ -3595,8 +4291,6 @@ function Echoes:OnEnable()
 end
 
 function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
-    if not self._EchoesInviteSessionActive then return end
-
     msg = tostring(msg or "")
     msg = msg:gsub("^%s+", ""):gsub("%s+$", "")
     if msg ~= "Hello!" then return end
@@ -3604,24 +4298,33 @@ function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
     author = Echoes_NormalizeName(author)
     if author == "" then return end
 
-    self._EchoesInviteHelloFrom = self._EchoesInviteHelloFrom or {}
-    self._EchoesInviteHelloFrom[author] = true
+    -- 1) Group Creation invite verification.
+    if self._EchoesInviteSessionActive then
+        self._EchoesInviteHelloFrom = self._EchoesInviteHelloFrom or {}
+        self._EchoesInviteHelloFrom[author] = true
 
-    -- If the invite queue is waiting for a Hello handshake, bind this sender to the current step.
-    if self._EchoesWaitHelloActive and (not self._EchoesWaitHelloName or self._EchoesWaitHelloName == "") then
-        self._EchoesWaitHelloName = author
+        -- If the invite queue is waiting for a Hello handshake, bind this sender to the current step.
+        if self._EchoesWaitHelloActive and (not self._EchoesWaitHelloName or self._EchoesWaitHelloName == "") then
+            self._EchoesWaitHelloName = author
 
-        -- Lock in the planned spec/class for this bot name so party->raid reordering doesn't lose it.
-        if self._EchoesWaitHelloPlan and type(self._EchoesWaitHelloPlan) == "table" then
-            self._EchoesPlannedTalentByName = self._EchoesPlannedTalentByName or {}
-            local k = author:lower()
-            self._EchoesPlannedTalentByName[k] = {
-                classText = tostring(self._EchoesWaitHelloPlan.classText or ""),
-                specLabel = tostring(self._EchoesWaitHelloPlan.specLabel or ""),
-                group = tonumber(self._EchoesWaitHelloPlan.group) or nil,
-                slot = tonumber(self._EchoesWaitHelloPlan.slot) or nil,
-            }
+            -- Lock in the planned spec/class for this bot name so party->raid reordering doesn't lose it.
+            if self._EchoesWaitHelloPlan and type(self._EchoesWaitHelloPlan) == "table" then
+                self._EchoesPlannedTalentByName = self._EchoesPlannedTalentByName or {}
+                local k = author:lower()
+                self._EchoesPlannedTalentByName[k] = {
+                    classText = tostring(self._EchoesWaitHelloPlan.classText or ""),
+                    specLabel = tostring(self._EchoesWaitHelloPlan.specLabel or ""),
+                    group = tonumber(self._EchoesWaitHelloPlan.group) or nil,
+                    slot = tonumber(self._EchoesWaitHelloPlan.slot) or nil,
+                }
+            end
         end
+    end
+
+    -- 2) Bot Control "Add" verification.
+    if self._EchoesBotAddSessionActive then
+        self._EchoesBotAddHelloFrom = self._EchoesBotAddHelloFrom or {}
+        self._EchoesBotAddHelloFrom[author] = true
     end
 end
 
