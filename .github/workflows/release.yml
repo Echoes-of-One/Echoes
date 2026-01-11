@@ -2,6 +2,8 @@ name: Release
 
 on:
   push:
+    tags:
+      - 'V*'
 
 permissions:
   contents: write
@@ -22,19 +24,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="build-${GITHUB_RUN_NUMBER}"
+          TAG="${GITHUB_REF_NAME}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           PREV_TAG=""
-          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
-            PREV_TAG=$(git describe --tags --abbrev=0)
+          if git describe --tags --abbrev=0 --match 'V*' "${TAG}^" >/dev/null 2>&1; then
+            PREV_TAG=$(git describe --tags --abbrev=0 --match 'V*' "${TAG}^")
           fi
 
           if [ -n "$PREV_TAG" ]; then
-            RANGE="${PREV_TAG}..HEAD"
+            RANGE="${PREV_TAG}..${TAG}"
             HEADER="Changes since ${PREV_TAG}"
           else
-            RANGE="HEAD"
+            RANGE="${TAG}"
             HEADER="Changes"
           fi
 
@@ -56,6 +58,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          TAG="${GITHUB_REF_NAME}"
+
           rm -rf dist
           mkdir -p dist/Echoes
 
@@ -71,15 +75,15 @@ jobs:
           # Include Ace3 as a separate addon folder alongside Echoes.
           cp -R Ace3 dist/
 
-          (cd dist && zip -r "../Echoes-${GITHUB_RUN_NUMBER}.zip" Echoes Ace3)
+          (cd dist && zip -r "../Echoes-${TAG}.zip" Echoes Ace3)
 
       - name: Create GitHub release
         uses: ncipollo/release-action@v1
         with:
           tag: ${{ steps.changelog.outputs.tag }}
-          name: Echoes ${{ steps.changelog.outputs.tag }}
+          name: ${{ steps.changelog.outputs.tag }}
           body: ${{ steps.changelog.outputs.notes }}
-          artifacts: Echoes-${{ github.run_number }}.zip
+          artifacts: Echoes-${{ steps.changelog.outputs.tag }}.zip
           artifactContentType: application/zip
           makeLatest: true
           allowUpdates: false
