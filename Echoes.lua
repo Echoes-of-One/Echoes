@@ -226,6 +226,23 @@ local function SkinMainFrame(widget)
     f:SetScript("OnMouseUp", function(self, button)
         if button ~= "LeftButton" then return end
         self:StopMovingOrSizing()
+
+        -- Normalize anchor to TOPLEFT after moving so resizing (tab switches)
+        -- doesn't shift the top bar.
+        if self.GetLeft and self.GetTop and UIParent and self.SetPoint then
+            local left = self:GetLeft()
+            local top = self:GetTop()
+            if left and top then
+                local scale = (self.GetEffectiveScale and self:GetEffectiveScale()) or 1
+                local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+                if scale <= 0 then scale = 1 end
+                if parentScale <= 0 then parentScale = 1 end
+                local x = left * scale / parentScale
+                local y = top * scale / parentScale
+                self:ClearAllPoints()
+                self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+            end
+        end
     end)
 
     -- Hide AceGUI sizer widgets completely
@@ -1930,6 +1947,28 @@ function Echoes:ApplyFrameSizeForTab(key)
     if not frame then return end
     local s = FRAME_SIZES[key] or FRAME_SIZES["BOT"]
 
+    -- Keep the window anchored by its TOPLEFT so changing tab sizes does not make
+    -- the tab buttons "jump" around (CENTER-anchored resizing moves the top edge).
+    local function NormalizeToTopLeft()
+        local f = frame.frame
+        if not f or not f.GetLeft or not f.GetTop or not f.SetPoint then return end
+        local left = f:GetLeft()
+        local top = f:GetTop()
+        if not left or not top or not UIParent then return end
+
+        local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+        local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+        if scale <= 0 then scale = 1 end
+        if parentScale <= 0 then parentScale = 1 end
+
+        local x = left * scale / parentScale
+        local y = top * scale / parentScale
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    end
+
+    NormalizeToTopLeft()
+
     -- Constrain to available screen space, accounting for addon UI scale.
     -- This keeps the window usable across different resolutions.
     local scale = EchoesDB.uiScale or 1.0
@@ -1954,6 +1993,9 @@ function Echoes:ApplyFrameSizeForTab(key)
 
     frame:SetWidth(math.floor(w + 0.5))
     frame:SetHeight(math.floor(h + 0.5))
+
+    -- Some AceGUI versions reassert points during sizing; normalize again.
+    NormalizeToTopLeft()
 end
 
 function Echoes:ApplyScale()
