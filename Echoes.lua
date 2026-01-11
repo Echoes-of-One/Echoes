@@ -116,9 +116,6 @@ local function EnsureDefaults()
         end
     end
 
-    -- Optional server-specific command template for setting talents/specs.
-    -- Tokens: {name} {class} {spec} {group} {slot}
-    EchoesDB.talentCommandTemplate = EchoesDB.talentCommandTemplate or ""
 end
 
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
@@ -1935,10 +1932,6 @@ local TAB_DEFS = {
     { key = "ECHOES", label = "Echoes" },
 }
 
-function Echoes:BuildBotTab(container)   end
-function Echoes:BuildGroupTab(container) end
-function Echoes:BuildEchoesTab(container)end
-
 ------------------------------------------------------------
 -- Frame size & scale helpers
 ------------------------------------------------------------
@@ -2096,7 +2089,7 @@ function Echoes:CreateMainWindow()
     end
 
     local frame = AceGUI:Create("Frame")
-    frame:SetTitle("Echoes")
+    frame:SetTitle("Echoes v0.1")
     frame:SetLayout("List")
     frame:SetWidth(FRAME_SIZES.BOT.w)
     frame:SetHeight(FRAME_SIZES.BOT.h)
