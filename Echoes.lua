@@ -3135,37 +3135,6 @@ function Echoes:BuildGroupTab(container)
 
     self.UI.groupSlots = {}
 
-    local function TryTargetRosterMember(member)
-        if not member or not member.name or member.name == "" then return end
-        -- Prefer unit tokens (raidN/partyN/player) for reliable targeting.
-        if member.unit and type(TargetUnit) == "function" then
-            pcall(TargetUnit, member.unit)
-            return
-        end
-        if type(TargetByName) == "function" then
-            pcall(TargetByName, member.name, true)
-            return
-        end
-        if type(TargetUnit) == "function" then
-            pcall(TargetUnit, member.name)
-        end
-    end
-
-    local function HookSlotTargeting(slot)
-        if not slot or not slot.classDrop then return end
-        local dd = slot.classDrop
-        if dd.dropdown and dd.dropdown.HookScript and not dd.dropdown._EchoesTargetHooked then
-            dd.dropdown._EchoesTargetHooked = true
-            dd.dropdown:HookScript("OnMouseUp", function(_, button)
-                if button ~= "LeftButton" then return end
-                local m = slot._EchoesMember
-                if m and m.name and m.name ~= "" then
-                    TryTargetRosterMember(m)
-                end
-            end)
-        end
-    end
-
     for colIndex, cfg in ipairs(COLUMN_CONFIG) do
         local col = AceGUI:Create("InlineGroup")
         col:SetTitle("")
@@ -3447,7 +3416,6 @@ function Echoes:BuildGroupTab(container)
                 nameBtn = nameBtn,
             }
             self.UI.groupSlots[colIndex][rowIndex] = slotObj
-            HookSlotTargeting(slotObj)
         end
     end
 
@@ -4190,6 +4158,26 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
     end
 
+    local function AnchorSlotDropdown(slot, showRightButton)
+        if not slot or not slot.classDrop or not slot.classDrop.frame then return end
+        if not slot.cycleBtn or not slot.cycleBtn.frame then return end
+
+        local ddFrame = slot.classDrop.frame
+        local cycleFrame = slot.cycleBtn.frame
+        local rowFrame = cycleFrame.GetParent and cycleFrame:GetParent() or nil
+        if not rowFrame then return end
+
+        ddFrame:ClearAllPoints()
+        ddFrame:SetPoint("TOP", rowFrame, "TOP", 0, 0)
+        ddFrame:SetPoint("BOTTOM", rowFrame, "BOTTOM", 0, 0)
+        ddFrame:SetPoint("LEFT", cycleFrame, "RIGHT", 8, 0)
+        if showRightButton and slot.nameBtn and slot.nameBtn.frame then
+            ddFrame:SetPoint("RIGHT", slot.nameBtn.frame, "LEFT", -6, 0)
+        else
+            ddFrame:SetPoint("RIGHT", rowFrame, "RIGHT", 0, 0)
+        end
+    end
+
     local function ResetSlot(slot)
         if not slot then return end
         SetEnabledForWidget(slot.cycleBtn, true)
@@ -4199,11 +4187,13 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         if slot.classDrop and slot.classDrop.button and slot.classDrop.button.EnableMouse then
             slot.classDrop.button:EnableMouse(true)
         end
+
         -- Only show Name for Altbot selection (or if an Altbot name exists)
         local altIndex = self.UI and self.UI._AltbotIndex
         local cur = slot.classDrop and (slot.classDrop._EchoesSelectedValue or slot.classDrop.value)
         local showName = (altIndex and cur == altIndex) or (slot.classDrop and slot.classDrop._EchoesAltbotName and slot.classDrop._EchoesAltbotName ~= "")
         SetNameButtonVisible(slot, showName and true or false)
+        AnchorSlotDropdown(slot, showName and true or false)
 
         slot._EchoesMember = nil
         SetNameButtonMode(slot, "name")
@@ -4257,20 +4247,6 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
         SetEnabledForDropdown(slot.classDrop, false)
 
-        -- Keep the dropdown box clickable so clicking the displayed name can target that unit.
-        -- (We still keep the arrow button disabled so the list can't be changed.)
-        if slot.classDrop then
-            if slot.classDrop.dropdown and slot.classDrop.dropdown.EnableMouse then
-                slot.classDrop.dropdown:EnableMouse(true)
-            end
-            if slot.classDrop.frame and slot.classDrop.frame.EnableMouse then
-                slot.classDrop.frame:EnableMouse(true)
-            end
-            if slot.classDrop.button and slot.classDrop.button.EnableMouse then
-                slot.classDrop.button:EnableMouse(false)
-            end
-        end
-
         -- AceGUI disabled state can override our text color; re-apply after disabling.
         if slot.classDrop and slot.classDrop.text and slot.classDrop.text.SetTextColor then
             if c then
@@ -4284,6 +4260,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         -- Name button: Kick for filled non-player slots; hidden for player slot.
         SetEnabledForWidget(slot.nameBtn, true)
         SetNameButtonVisible(slot, not member.isPlayer)
+        AnchorSlotDropdown(slot, not member.isPlayer)
         if not member.isPlayer then
             SetNameButtonMode(slot, "kick", member)
         else
