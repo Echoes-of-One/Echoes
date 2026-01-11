@@ -118,16 +118,17 @@ local function SkinMainFrame(widget)
 
     if not f.EchoesTitleBar then
         local tb = CreateFrame("Frame", nil, f)
-        tb:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -1)
-        tb:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -1)
-        tb:SetHeight(22)
+        tb:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -2)
+        tb:SetPoint("TOPRIGHT", f, "TOPRIGHT", 0, -2)
+        tb:SetHeight(28)
         SkinBackdrop(tb, 0.98)
+        tb:SetBackdropBorderColor(0, 0, 0, 0)
         f.EchoesTitleBar = tb
     end
 
     if widget.titletext then
         widget.titletext:ClearAllPoints()
-        widget.titletext:SetPoint("CENTER", f.EchoesTitleBar, "CENTER", 0, -1)
+        widget.titletext:SetPoint("CENTER", f.EchoesTitleBar, "CENTER", 0, 0)
         widget.titletext:SetTextColor(0.95, 0.95, 0.95, 1)
         local font, size, flags = widget.titletext:GetFont()
         widget.titletext:SetFont(font, (size or 14) + 1, "OUTLINE")
@@ -254,12 +255,24 @@ end
 local function SkinSimpleGroup(widget)
     if not widget or not widget.frame then return end
     -- Used mainly outside the Bot tab now; keep subtle backdrop
-    SkinBackdrop(widget.frame, 0.25)
+    SkinBackdrop(widget.frame, 0.18)
+    if widget.frame.SetBackdropBorderColor then
+        widget.frame:SetBackdropBorderColor(0, 0, 0, 0)
+    end
 end
 
-local function SkinInlineGroup(widget)
+local function SkinInlineGroup(widget, opts)
     if not widget or not widget.frame then return end
-    SkinBackdrop(widget.frame, 0.5)
+    opts = opts or {}
+    local alpha = (opts.alpha ~= nil) and opts.alpha or 0.35
+    SkinBackdrop(widget.frame, alpha)
+    if widget.frame.SetBackdropBorderColor then
+        if opts.border == false then
+            widget.frame:SetBackdropBorderColor(0, 0, 0, 0)
+        else
+            widget.frame:SetBackdropBorderColor(0, 0, 0, 0.85)
+        end
+    end
     if widget.border and widget.border.SetBackdrop then
         widget.border:SetBackdrop(nil)
     end
@@ -1175,16 +1188,27 @@ function Echoes:BuildGroupTab(container)
 
     local INPUT_HEIGHT = 24
 
+    local headerPadTop = AceGUI:Create("SimpleGroup")
+    headerPadTop:SetFullWidth(true)
+    headerPadTop:SetLayout("Flow")
+    headerPadTop:SetHeight(8)
+    container:AddChild(headerPadTop)
+
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
     topGroup:SetLayout("Flow")
     SkinSimpleGroup(topGroup)
     container:AddChild(topGroup)
 
+    local headerPadL = AceGUI:Create("SimpleGroup")
+    headerPadL:SetRelativeWidth(0.01)
+    headerPadL:SetLayout("Flow")
+    topGroup:AddChild(headerPadL)
+
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
     nameEdit:SetText("Text Box")
-    nameEdit:SetRelativeWidth(0.40)
+    nameEdit:SetRelativeWidth(0.35)
     nameEdit:SetHeight(INPUT_HEIGHT)
     nameEdit:SetCallback("OnEnterPressed", function(widget, event, text)
         if text == "" then
@@ -1208,7 +1232,7 @@ function Echoes:BuildGroupTab(container)
     templateDrop:SetLabel("")
     templateDrop:SetList(templateValues)
     templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
-    templateDrop:SetRelativeWidth(0.40)
+    templateDrop:SetRelativeWidth(0.35)
     templateDrop:SetHeight(INPUT_HEIGHT)
     templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
         EchoesDB.groupTemplateIndex = value
@@ -1231,11 +1255,32 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(saveBtn)
     SkinButton(saveBtn)
 
+    local deleteBtn = AceGUI:Create("Button")
+    deleteBtn:SetText("Delete")
+    deleteBtn:SetRelativeWidth(0.12)
+    deleteBtn:SetHeight(INPUT_HEIGHT)
+    deleteBtn:SetCallback("OnClick", function()
+        Echoes_Print("Group setup deleted (stub).")
+    end)
+    topGroup:AddChild(deleteBtn)
+    SkinButton(deleteBtn)
+
+    local headerPadR = AceGUI:Create("SimpleGroup")
+    headerPadR:SetRelativeWidth(0.01)
+    headerPadR:SetLayout("Flow")
+    topGroup:AddChild(headerPadR)
+
+    local headerPadBottom = AceGUI:Create("SimpleGroup")
+    headerPadBottom:SetFullWidth(true)
+    headerPadBottom:SetLayout("Flow")
+    headerPadBottom:SetHeight(8)
+    container:AddChild(headerPadBottom)
+
     local gridGroup = AceGUI:Create("InlineGroup")
     gridGroup:SetTitle("Group Slots")
     gridGroup:SetFullWidth(true)
     gridGroup:SetLayout("Flow")
-    SkinInlineGroup(gridGroup)
+    SkinInlineGroup(gridGroup, { border = true, alpha = 0.30 })
     container:AddChild(gridGroup)
 
     -- Layout groups in a 3x2 grid (3 on first row, 2 on second row)
@@ -1301,7 +1346,7 @@ function Echoes:BuildGroupTab(container)
         -- 3 columns per row; Flow will wrap the remaining groups to row 2.
         -- Slightly wider columns so the right-side button text doesn't clip.
         col:SetRelativeWidth(0.325)
-        SkinInlineGroup(col)
+        SkinInlineGroup(col, { border = false, alpha = 0.28 })
         gridGroup:AddChild(col)
 
         self.UI.groupSlots[colIndex] = self.UI.groupSlots[colIndex] or {}
@@ -1380,6 +1425,12 @@ function Echoes:BuildGroupTab(container)
             cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
             cycleBtn.index  = 1
             cycleBtn._EchoesCycleUpdate = CycleUpdate
+
+            -- AceGUI's Button widget will pass the WoW mouse button name (e.g. "RightButton")
+            -- to the OnClick callback, but only if the frame is registered for right-clicks.
+            if cycleBtn.frame and cycleBtn.frame.RegisterForClicks then
+                cycleBtn.frame:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            end
 
             cycleBtn:SetCallback("OnClick", function(widget, event, button)
                 local btn = widget
@@ -1460,7 +1511,7 @@ function Echoes:BuildGroupTab(container)
     end
     actionCol:SetLayout("List")
     actionCol:SetRelativeWidth(0.325)
-    SkinInlineGroup(actionCol)
+    SkinInlineGroup(actionCol, { border = false, alpha = 0.28 })
     gridGroup:AddChild(actionCol)
 
     local inviteBtn = AceGUI:Create("Button")
@@ -1623,7 +1674,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
     if inRaid then
         for i = 1, n do
-            local name, _, subgroup, _, classFile = GetRaidRosterInfo(i)
+            -- 3.3.5 GetRaidRosterInfo return order: name, rank, subgroup, level, class, classFile, ...
+            local name, _, subgroup, _, _, classFile = GetRaidRosterInfo(i)
             subgroup = tonumber(subgroup)
             if subgroup and subgroup >= 1 and subgroup <= 5 then
                 membersByGroup[subgroup] = membersByGroup[subgroup] or {}
