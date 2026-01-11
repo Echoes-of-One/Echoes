@@ -815,8 +815,7 @@ local function SkinDropdown(widget)
     end
 
     -- AceGUI Dropdown uses UIDropDownMenuTemplate. The visible "box" is actually
-    -- widget.dropdown, which AceGUI offsets (-15/+17) to account for Blizzard art.
-    -- We remove that art, anchor the dropdown to the frame, and skin the dropdown
+    -- widget.dropdown, which AceGUI offsets (-15/+17) to account for Blizzard art- We remove that art, anchor the dropdown to the frame, and skin the dropdown
     -- itself so it reads as a real dropdown box.
     local box = widget.dropdown or f
 
@@ -1203,39 +1202,21 @@ function Echoes:RunActionQueue(actions, interval, onDone)
         f:Hide()
         f:SetScript("OnUpdate", function(_, elapsed)
             -- If we're in a "wait for Hello" handshake, don't advance the queue until
-            -- we either see a Hello sender and they join, or we time out.
+            -- we see a Hello sender (or we time out). We do NOT /invite immediately here;
+            -- the server-side .playerbots command typically issues the invite itself.
+            -- Any stragglers are handled by the end-of-invite missing check.
             if Echoes._EchoesWaitHelloActive then
                 local now = (type(GetTime) == "function" and GetTime()) or 0
                 local deadline = Echoes._EchoesWaitHelloDeadline or 0
                 local name = Echoes._EchoesWaitHelloName
 
                 if name and name ~= "" then
-                    if Echoes_IsNameInGroup(name) then
-                        Echoes._EchoesWaitHelloActive = false
-                        Echoes._EchoesWaitHelloName = nil
-                        Echoes._EchoesWaitHelloInvited = false
-                        Echoes._EchoesWaitHelloDeadline = nil
-                        return
-                    end
-
-                    if not Echoes._EchoesWaitHelloInvited then
-                        Echoes._EchoesWaitHelloInvited = true
-                        if type(InviteUnit) == "function" then
-                            InviteUnit(name)
-                        end
-                        local post = Echoes._EchoesWaitHelloPostInviteTimeout or 2.0
-                        Echoes._EchoesWaitHelloDeadline = now + post
-                        return
-                    end
-
-                    if now >= deadline then
-                        Echoes._EchoesWaitHelloActive = false
-                        Echoes._EchoesWaitHelloName = nil
-                        Echoes._EchoesWaitHelloInvited = false
-                        Echoes._EchoesWaitHelloDeadline = nil
-                        return
-                    end
-
+                    Echoes._EchoesWaitHelloActive = false
+                    Echoes._EchoesWaitHelloName = nil
+                    Echoes._EchoesWaitHelloInvited = false
+                    Echoes._EchoesWaitHelloPlan = nil
+                    Echoes._EchoesWaitHelloPostInviteTimeout = nil
+                    Echoes._EchoesWaitHelloDeadline = nil
                     return
                 end
 
@@ -2888,14 +2869,35 @@ function Echoes:BuildGroupTab(container)
     talentsBtn:SetText("Set Talents")
     talentsBtn:SetFullWidth(true)
     talentsBtn:SetCallback("OnClick", function()
-        local tpl = tostring(EchoesDB.talentCommandTemplate or "")
-        tpl = tpl:gsub("^%s+", ""):gsub("%s+$", "")
-        if tpl == "" then
-            Echoes_Print("Set Talents: configure a Talent Command in the Echoes tab.")
-            return
-        end
-
         if not self.UI or not self.UI.groupSlots then return end
+
+        local function SpecLabelToTalentSpec(specLabel)
+            local s = tostring(specLabel or "")
+            s = s:gsub("^%s+", ""):gsub("%s+$", "")
+            local key = s:lower()
+            key = key:gsub("%s+", "")
+
+            if key == "bear" then return "bear" end
+            if key == "feral" then return "cat" end
+            if key == "cat" then return "cat" end
+            if key == "protection" then return "prot" end
+            if key == "frostfire" then return "frostfire" end
+
+            if key == "restoration" then return "resto" end
+            if key == "discipline" then return "disc" end
+            if key == "retribution" then return "ret" end
+            if key == "enhancement" then return "enh" end
+            if key == "elemental" then return "ele" end
+            if key == "marksmanship" then return "mm" end
+            if key == "survival" then return "sv" end
+            if key == "beastmastery" then return "bm" end
+            if key == "assassination" then return "ass" end
+            if key == "demonology" then return "demo" end
+            if key == "destruction" then return "destro" end
+            if key == "affliction" then return "aff" end
+
+            return key
+        end
 
         local actions = {}
         for g = 1, 5 do
@@ -2903,6 +2905,22 @@ function Echoes:BuildGroupTab(container)
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
                 local member = slot and slot._EchoesMember or nil
                 if member and not member.isPlayer and member.name and member.name ~= "" then
+                    -- Snapshot the *current* icon selection into our plan tables.
+                    local curLabel = (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
+                    curLabel = tostring(curLabel or "")
+                    curLabel = curLabel:gsub("^%s+", ""):gsub("%s+$", "")
+                    if curLabel ~= "" then
+                        self._EchoesPlannedTalentByPos = self._EchoesPlannedTalentByPos or {}
+                        self._EchoesPlannedTalentByPos[g] = self._EchoesPlannedTalentByPos[g] or {}
+                        self._EchoesPlannedTalentByPos[g][p] = self._EchoesPlannedTalentByPos[g][p] or {}
+                        self._EchoesPlannedTalentByPos[g][p].specLabel = curLabel
+
+                        self._EchoesPlannedTalentByName = self._EchoesPlannedTalentByName or {}
+                        local nk = Echoes_NormalizeName(member.name):lower()
+                        self._EchoesPlannedTalentByName[nk] = self._EchoesPlannedTalentByName[nk] or {}
+                        self._EchoesPlannedTalentByName[nk].specLabel = curLabel
+                    end
+
                     local byName = nil
                     if self._EchoesPlannedTalentByName then
                         local nk = Echoes_NormalizeName(member.name):lower()
@@ -2910,26 +2928,12 @@ function Echoes:BuildGroupTab(container)
                     end
 
                     local planned = self._EchoesPlannedTalentByPos and self._EchoesPlannedTalentByPos[g] and self._EchoesPlannedTalentByPos[g][p]
-                    local spec = (byName and byName.specLabel) or (planned and planned.specLabel) or (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
-                    local classText = nil
-                    if member.classFile then
-                        for disp, classFile in pairs(DISPLAY_TO_CLASSFILE) do
-                            if classFile == member.classFile then
-                                classText = disp
-                                break
-                            end
-                        end
+                    local specLabel = (byName and byName.specLabel) or (planned and planned.specLabel) or (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
+                    local spec = SpecLabelToTalentSpec(specLabel)
+                    if spec and spec ~= "" then
+                        local msg = "talents spec " .. spec .. " pve"
+                        actions[#actions + 1] = { kind = "chat", msg = msg, channel = "WHISPER", target = member.name }
                     end
-
-                    local msg = tpl
-                    msg = msg:gsub("{name}", tostring(member.name))
-                    msg = msg:gsub("{class}", tostring(classText or ""))
-                    msg = msg:gsub("{spec}", tostring(spec or ""))
-                    msg = msg:gsub("{group}", tostring(g))
-                    msg = msg:gsub("{slot}", tostring(p))
-
-                    local ch = (EchoesDB.sendAsChat and EchoesDB.chatChannel) or "PARTY"
-                    actions[#actions + 1] = { kind = "chat", msg = msg, channel = ch }
                 end
             end
         end
@@ -2944,6 +2948,29 @@ function Echoes:BuildGroupTab(container)
     end)
     actionCol:AddChild(talentsBtn)
     SkinButton(talentsBtn)
+
+    local maintBtn = AceGUI:Create("Button")
+    maintBtn:SetText("Maintenance / Autogear")
+    maintBtn:SetFullWidth(true)
+    maintBtn:SetCallback("OnClick", function()
+        local inRaid = (type(GetNumRaidMembers) == "function" and (GetNumRaidMembers() or 0) > 0)
+        local inParty = (not inRaid) and (type(GetNumPartyMembers) == "function" and (GetNumPartyMembers() or 0) > 0)
+        local ch = inRaid and "RAID" or (inParty and "PARTY" or nil)
+
+        if not ch then
+            Echoes_Print("Maintenance: you are not in a party/raid.")
+            return
+        end
+
+        if type(SendChatMessage) == "function" then
+            SendChatMessage("maintenance", ch)
+            self:RunAfter(5.0, function()
+                SendChatMessage("autogear", ch)
+            end)
+        end
+    end)
+    actionCol:AddChild(maintBtn)
+    SkinButton(maintBtn)
 
     -- Initialize from roster once the page is built.
     self:UpdateGroupCreationFromRoster(true)
