@@ -543,12 +543,12 @@ local ECHOES_TARGET_SPEC_OPTIONS = {
     HUNTER = {
         { spec = "bm", icon = "Interface\\Icons\\Ability_Hunter_BeastTaming" },
         { spec = "mm", icon = "Interface\\Icons\\Ability_Marksmanship" },
-        { spec = "sv", icon = "Interface\\Icons\\Ability_Hunter_SwiftStrike" },
+        { spec = "surv", icon = "Interface\\Icons\\Ability_Hunter_SwiftStrike" },
     },
     ROGUE = {
-        { spec = "ass",    icon = "Interface\\Icons\\Ability_Rogue_Eviscerate" },
+        { spec = "as",    icon = "Interface\\Icons\\Ability_Rogue_Eviscerate" },
         { spec = "combat", icon = "Interface\\Icons\\Ability_BackStab" },
-        { spec = "sub",    icon = "Interface\\Icons\\Ability_Stealth" },
+        { spec = "subtlety",    icon = "Interface\\Icons\\Ability_Stealth" },
     },
     PRIEST = {
         { spec = "disc",   icon = "Interface\\Icons\\Spell_Holy_PowerWordShield" },
@@ -567,7 +567,7 @@ local ECHOES_TARGET_SPEC_OPTIONS = {
         { spec = "frostfire", icon = "Interface\\Icons\\Ability_Mage_FrostFireBolt" },
     },
     WARLOCK = {
-        { spec = "aff",    icon = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
+        { spec = "affli",    icon = "Interface\\Icons\\Spell_Shadow_DeathCoil" },
         { spec = "demo",   icon = "Interface\\Icons\\Spell_Shadow_Metamorphosis" },
         { spec = "destro", icon = "Interface\\Icons\\Spell_Shadow_RainOfFire" },
     },
@@ -3135,6 +3135,37 @@ function Echoes:BuildGroupTab(container)
 
     self.UI.groupSlots = {}
 
+    local function TryTargetRosterMember(member)
+        if not member or not member.name or member.name == "" then return end
+        -- Prefer unit tokens (raidN/partyN/player) for reliable targeting.
+        if member.unit and type(TargetUnit) == "function" then
+            pcall(TargetUnit, member.unit)
+            return
+        end
+        if type(TargetByName) == "function" then
+            pcall(TargetByName, member.name, true)
+            return
+        end
+        if type(TargetUnit) == "function" then
+            pcall(TargetUnit, member.name)
+        end
+    end
+
+    local function HookSlotTargeting(slot)
+        if not slot or not slot.classDrop then return end
+        local dd = slot.classDrop
+        if dd.dropdown and dd.dropdown.HookScript and not dd.dropdown._EchoesTargetHooked then
+            dd.dropdown._EchoesTargetHooked = true
+            dd.dropdown:HookScript("OnMouseUp", function(_, button)
+                if button ~= "LeftButton" then return end
+                local m = slot._EchoesMember
+                if m and m.name and m.name ~= "" then
+                    TryTargetRosterMember(m)
+                end
+            end)
+        end
+    end
+
     for colIndex, cfg in ipairs(COLUMN_CONFIG) do
         local col = AceGUI:Create("InlineGroup")
         col:SetTitle("")
@@ -3410,11 +3441,13 @@ function Echoes:BuildGroupTab(container)
                 nameBtn.text:SetFont(font, 9, flags)
             end
 
-            self.UI.groupSlots[colIndex][rowIndex] = {
+            local slotObj = {
                 cycleBtn = cycleBtn,
                 classDrop = dd,
                 nameBtn = nameBtn,
             }
+            self.UI.groupSlots[colIndex][rowIndex] = slotObj
+            HookSlotTargeting(slotObj)
         end
     end
 
@@ -3941,10 +3974,10 @@ function Echoes:BuildGroupTab(container)
             if key == "marksmanship" then return "mm" end
             if key == "survival" then return "sv" end
             if key == "beastmastery" then return "bm" end
-            if key == "assassination" then return "ass" end
+            if key == "assassination" then return "as" end
             if key == "demonology" then return "demo" end
             if key == "destruction" then return "destro" end
-            if key == "affliction" then return "aff" end
+            if key == "affliction" then return "affli" end
 
             return key
         end
@@ -4162,6 +4195,10 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
         SetEnabledForWidget(slot.nameBtn, true)
+
+        if slot.classDrop and slot.classDrop.button and slot.classDrop.button.EnableMouse then
+            slot.classDrop.button:EnableMouse(true)
+        end
         -- Only show Name for Altbot selection (or if an Altbot name exists)
         local altIndex = self.UI and self.UI._AltbotIndex
         local cur = slot.classDrop and (slot.classDrop._EchoesSelectedValue or slot.classDrop.value)
@@ -4219,6 +4256,20 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             end
         end
         SetEnabledForDropdown(slot.classDrop, false)
+
+        -- Keep the dropdown box clickable so clicking the displayed name can target that unit.
+        -- (We still keep the arrow button disabled so the list can't be changed.)
+        if slot.classDrop then
+            if slot.classDrop.dropdown and slot.classDrop.dropdown.EnableMouse then
+                slot.classDrop.dropdown:EnableMouse(true)
+            end
+            if slot.classDrop.frame and slot.classDrop.frame.EnableMouse then
+                slot.classDrop.frame:EnableMouse(true)
+            end
+            if slot.classDrop.button and slot.classDrop.button.EnableMouse then
+                slot.classDrop.button:EnableMouse(false)
+            end
+        end
 
         -- AceGUI disabled state can override our text color; re-apply after disabling.
         if slot.classDrop and slot.classDrop.text and slot.classDrop.text.SetTextColor then
