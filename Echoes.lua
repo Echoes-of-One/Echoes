@@ -54,6 +54,57 @@ local function EnsureDefaults()
         }
     end
 
+    -- 25 Man: leave Group 1 Slot 1 open for the player.
+    if not EchoesDB.groupTemplates[2] then
+        EchoesDB.groupTemplates[2] = {
+            name = "25 Man",
+            slots = {
+                [1] = {
+                    [1] = nil,
+                    [2] = { class = "Druid",   specLabel = "Bear" },
+                    [3] = { class = "Paladin", specLabel = "Protection" },
+                    [4] = { class = "Warrior", specLabel = "Protection" },
+                    [5] = { class = "Paladin", specLabel = "Holy" },
+                },
+                [2] = {
+                    [1] = { class = "Priest",  specLabel = "Discipline" },
+                    [2] = { class = "Shaman",  specLabel = "Restoration" },
+                    [3] = { class = "Druid",   specLabel = "Restoration" },
+                    [4] = { class = "Priest",  specLabel = "Holy" },
+                    [5] = { class = "Warlock", specLabel = "Affliction" },
+                },
+                [3] = {
+                    [1] = { class = "Warrior", specLabel = "Fury" },
+                    [2] = { class = "Rogue",   specLabel = "Assassination" },
+                    [3] = { class = "Rogue",   specLabel = "Combat" },
+                    [4] = { class = "Druid",   specLabel = "Feral" },
+                    [5] = { class = "Shaman",  specLabel = "Enhancement" },
+                },
+                [4] = {
+                    [1] = { class = "Paladin", specLabel = "Retribution" },
+                    [2] = { class = "Hunter",  specLabel = "Marksmanship" },
+                    [3] = { class = "Hunter",  specLabel = "Survival" },
+                    [4] = { class = "Druid",   specLabel = "Balance" },
+                    [5] = { class = "Shaman",  specLabel = "Elemental" },
+                },
+                [5] = {
+                    [1] = { class = "Shaman",  specLabel = "Elemental" },
+                    [2] = { class = "Shaman",  specLabel = "Elemental" },
+                    [3] = { class = "Warlock", specLabel = "Demonology" },
+                    [4] = { class = "Mage",    specLabel = "Arcane" },
+                    [5] = { class = "Mage",    specLabel = "Fire" },
+                },
+            },
+        }
+    else
+        -- Migration: older default used "Feral" for the bear tank slot.
+        local t2 = EchoesDB.groupTemplates[2]
+        local e = t2 and t2.slots and t2.slots[1] and t2.slots[1][2]
+        if t2 and t2.name == "25 Man" and e and e.class == "Druid" and e.specLabel == "Feral" and not e.altName then
+            e.specLabel = "Bear"
+        end
+    end
+
     -- Optional server-specific command template for setting talents/specs.
     -- Tokens: {name} {class} {spec} {group} {slot}
     EchoesDB.talentCommandTemplate = EchoesDB.talentCommandTemplate or ""
@@ -1054,7 +1105,89 @@ end
 
 -- Small action queue to avoid spamming chat / invite too fast.
 -- actions: { { kind = "chat", msg = "...", channel = "PARTY", target = nil }, { kind = "invite", name = "..." }, ... }
-function Echoes:RunActionQueue(actions, interval)
+local function Echoes_NormalizeName(name)
+    name = tostring(name or "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    name = name:gsub("%-.+$", "") -- strip realm (Name-Realm)
+    return name
+end
+
+function Echoes:RunAfter(delaySeconds, fn)
+    delaySeconds = tonumber(delaySeconds) or 0
+    if delaySeconds < 0 then delaySeconds = 0 end
+
+    if type(fn) ~= "function" then return end
+
+    if not self._EchoesAfterFrame then
+        local f = CreateFrame("Frame", nil, UIParent)
+        f:Hide()
+        f:SetScript("OnUpdate", function(_, elapsed)
+            if not Echoes._EchoesAfterQueue or #Echoes._EchoesAfterQueue == 0 then
+                f:Hide()
+                return
+            end
+
+            for i = #Echoes._EchoesAfterQueue, 1, -1 do
+                local item = Echoes._EchoesAfterQueue[i]
+                item.t = (item.t or 0) - (elapsed or 0)
+                if item.t <= 0 then
+                    table.remove(Echoes._EchoesAfterQueue, i)
+                    local ok, err = pcall(item.fn)
+                    if not ok then
+                        Echoes_Print("Timer error: " .. tostring(err))
+                    end
+                end
+            end
+        end)
+        self._EchoesAfterFrame = f
+    end
+
+    self._EchoesAfterQueue = self._EchoesAfterQueue or {}
+    self._EchoesAfterQueue[#self._EchoesAfterQueue + 1] = { t = delaySeconds, fn = fn }
+    self._EchoesAfterFrame:Show()
+end
+
+local function Echoes_IsNameInGroup(name)
+    name = Echoes_NormalizeName(name)
+    if name == "" then return false end
+    local needle = name:lower()
+
+    if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
+        local n = GetNumRaidMembers() or 0
+        if n > 0 then
+            for i = 1, n do
+                local rn = GetRaidRosterInfo(i)
+                rn = Echoes_NormalizeName(rn)
+                if rn ~= "" and rn:lower() == needle then
+                    return true
+                end
+            end
+        end
+    end
+
+    if UnitName and UnitName("player") then
+        local pn = Echoes_NormalizeName(UnitName("player"))
+        if pn ~= "" and pn:lower() == needle then
+            return true
+        end
+    end
+
+    if type(GetNumPartyMembers) == "function" then
+        local nParty = GetNumPartyMembers() or 0
+        for i = 1, math.min(4, nParty) do
+            local unit = "party" .. i
+            local un = UnitName and UnitName(unit)
+            un = Echoes_NormalizeName(un)
+            if un ~= "" and un:lower() == needle then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+function Echoes:RunActionQueue(actions, interval, onDone)
     if not actions or #actions == 0 then return end
     interval = tonumber(interval) or 0.25
     if interval < 0.05 then interval = 0.05 end
@@ -1062,12 +1195,71 @@ function Echoes:RunActionQueue(actions, interval)
     self._EchoesActionQueue = actions
     self._EchoesActionInterval = interval
     self._EchoesActionElapsed = 0
+    self._EchoesActionOnDone = onDone
+    self._EchoesActionOnDoneFired = false
 
     if not self._EchoesActionFrame then
         local f = CreateFrame("Frame", nil, UIParent)
         f:Hide()
         f:SetScript("OnUpdate", function(_, elapsed)
+            -- If we're in a "wait for Hello" handshake, don't advance the queue until
+            -- we either see a Hello sender and they join, or we time out.
+            if Echoes._EchoesWaitHelloActive then
+                local now = (type(GetTime) == "function" and GetTime()) or 0
+                local deadline = Echoes._EchoesWaitHelloDeadline or 0
+                local name = Echoes._EchoesWaitHelloName
+
+                if name and name ~= "" then
+                    if Echoes_IsNameInGroup(name) then
+                        Echoes._EchoesWaitHelloActive = false
+                        Echoes._EchoesWaitHelloName = nil
+                        Echoes._EchoesWaitHelloInvited = false
+                        Echoes._EchoesWaitHelloDeadline = nil
+                        return
+                    end
+
+                    if not Echoes._EchoesWaitHelloInvited then
+                        Echoes._EchoesWaitHelloInvited = true
+                        if type(InviteUnit) == "function" then
+                            InviteUnit(name)
+                        end
+                        local post = Echoes._EchoesWaitHelloPostInviteTimeout or 2.0
+                        Echoes._EchoesWaitHelloDeadline = now + post
+                        return
+                    end
+
+                    if now >= deadline then
+                        Echoes._EchoesWaitHelloActive = false
+                        Echoes._EchoesWaitHelloName = nil
+                        Echoes._EchoesWaitHelloInvited = false
+                        Echoes._EchoesWaitHelloDeadline = nil
+                        return
+                    end
+
+                    return
+                end
+
+                if now >= deadline then
+                    Echoes._EchoesWaitHelloActive = false
+                    Echoes._EchoesWaitHelloName = nil
+                    Echoes._EchoesWaitHelloInvited = false
+                    Echoes._EchoesWaitHelloDeadline = nil
+                    return
+                end
+
+                return
+            end
+
             if not Echoes._EchoesActionQueue or #Echoes._EchoesActionQueue == 0 then
+                if Echoes._EchoesActionOnDone and not Echoes._EchoesActionOnDoneFired then
+                    Echoes._EchoesActionOnDoneFired = true
+                    local cb = Echoes._EchoesActionOnDone
+                    Echoes._EchoesActionOnDone = nil
+                    local ok, err = pcall(cb)
+                    if not ok then
+                        Echoes_Print("ActionQueue onDone error: " .. tostring(err))
+                    end
+                end
                 f:Hide()
                 return
             end
@@ -1078,7 +1270,29 @@ function Echoes:RunActionQueue(actions, interval)
             end
             Echoes._EchoesActionElapsed = 0
 
-            local a = table.remove(Echoes._EchoesActionQueue, 1)
+            -- Peek so we can convert-to-raid before consuming the action that would invite beyond party size.
+            local a = Echoes._EchoesActionQueue[1]
+            if not a then return end
+
+            -- If this invite run needs >5 and party is full, convert to raid before issuing the next add/invite.
+            if Echoes._EchoesInviteSessionActive and Echoes._EchoesInviteNeedsRaid and type(ConvertToRaid) == "function" then
+                local nRaid = (type(GetNumRaidMembers) == "function" and GetNumRaidMembers()) or 0
+                local inRaid = (nRaid and nRaid > 0)
+                if not inRaid and type(GetNumPartyMembers) == "function" then
+                    local nParty = GetNumPartyMembers() or 0
+                    -- Party is full when GetNumPartyMembers() returns 4 (player + 4).
+                    if nParty >= 4 then
+                        local now = (type(GetTime) == "function" and GetTime()) or 0
+                        if not Echoes._EchoesLastConvertToRaid or (now - Echoes._EchoesLastConvertToRaid) > 1.0 then
+                            Echoes._EchoesLastConvertToRaid = now
+                            ConvertToRaid()
+                        end
+                        return
+                    end
+                end
+            end
+
+            a = table.remove(Echoes._EchoesActionQueue, 1)
             if not a then return end
 
             if a.kind == "invite" then
@@ -1088,6 +1302,20 @@ function Echoes:RunActionQueue(actions, interval)
             elseif a.kind == "chat" then
                 if type(SendChatMessage) == "function" and a.msg and a.msg ~= "" then
                     SendChatMessage(a.msg, a.channel or "PARTY", nil, a.target)
+                end
+            elseif a.kind == "chat_wait_hello" then
+                if type(SendChatMessage) == "function" and a.msg and a.msg ~= "" then
+                    SendChatMessage(a.msg, a.channel or "PARTY", nil, a.target)
+
+                    local now = (type(GetTime) == "function" and GetTime()) or 0
+                    local timeout = tonumber(a.helloTimeout) or 2.0
+                    if timeout < 0.5 then timeout = 0.5 end
+                    Echoes._EchoesWaitHelloActive = true
+                    Echoes._EchoesWaitHelloName = nil
+                    Echoes._EchoesWaitHelloInvited = false
+                    Echoes._EchoesWaitHelloPlan = (type(a.plan) == "table") and a.plan or nil
+                    Echoes._EchoesWaitHelloPostInviteTimeout = tonumber(a.postInviteTimeout) or 2.0
+                    Echoes._EchoesWaitHelloDeadline = now + timeout
                 end
             end
         end)
@@ -1881,6 +2109,23 @@ function Echoes:BuildGroupTab(container)
         local slots = tpl and tpl.slots
         if not slots or not self.UI or not self.UI.groupSlots then return end
 
+        -- Build a stable per-position plan for specs (used both for icon persistence and Set Talents later).
+        self._EchoesPlannedTalentByPos = {}
+        for g = 1, 5 do
+            self._EchoesPlannedTalentByPos[g] = {}
+            for p = 1, 5 do
+                local entry = slots[g] and slots[g][p]
+                if entry and type(entry) == "table" then
+                    self._EchoesPlannedTalentByPos[g][p] = {
+                        classText = tostring(entry.class or ""),
+                        specLabel = tostring(entry.specLabel or ""),
+                    }
+                else
+                    self._EchoesPlannedTalentByPos[g][p] = nil
+                end
+            end
+        end
+
         for g = 1, 5 do
             for p = 1, 5 do
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
@@ -2466,25 +2711,129 @@ function Echoes:BuildGroupTab(container)
             ["Mage"] = "mage",
         }
 
-        local actions = {}
+        local function NormalizeAltbotToAddClassCmd(name)
+            name = tostring(name or "")
+            name = name:gsub("^%s+", ""):gsub("%s+$", "")
+            if name == "" then return nil end
+
+            local key = name:lower()
+            key = key:gsub("%s+", " ")
+
+            if key == "deathknight" or key == "death knight" or key == "dk" then return "dk" end
+            if key == "warrior" then return "warrior" end
+            if key == "paladin" then return "paladin" end
+            if key == "hunter" then return "hunter" end
+            if key == "rogue" then return "rogue" end
+            if key == "priest" then return "priest" end
+            if key == "shaman" then return "shaman" end
+            if key == "warlock" then return "warlock" end
+            if key == "mage" then return "mage" end
+            if key == "druid" then return "druid" end
+            return nil
+        end
+
+        -- Invite session: track bot "Hello!" whispers and named bots we asked for.
+        self._EchoesInviteSessionActive = true
+        self._EchoesInviteHelloFrom = {}
+        self._EchoesInviteExpectedByName = {}
+
+        -- Decide whether this preset is bigger than a 5-man and needs raid conversion.
+        local configuredCount = 0
         for g = 1, 5 do
             for p = 1, 5 do
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
-                if slot and not slot._EchoesMember and slot.classDrop then
+                if slot and slot.classDrop then
+                    if not ((slot._EchoesMember and slot._EchoesMember.isPlayer) or (slot.cycleBtn and slot.cycleBtn._EchoesLocked)) then
+                        local dd = slot.classDrop
+                        local value = dd._EchoesSelectedValue or dd.value or 1
+                        local classText = slotValues[value]
+                        if classText and classText ~= "None" then
+                            configuredCount = configuredCount + 1
+                        end
+                    end
+                end
+            end
+        end
+        -- Party limit is player + 4; if we have more configured than that, we must convert once party is full.
+        self._EchoesInviteNeedsRaid = (configuredCount > 4)
+
+        -- Remember intended specs per slot (so Set Talents can be run after invites without relying on roster timing).
+        self._EchoesPlannedTalentByPos = self._EchoesPlannedTalentByPos or {}
+
+        local actions = {}
+        local seenAddByName = {}
+        for g = 1, 5 do
+            self._EchoesPlannedTalentByPos[g] = {}
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot and slot.classDrop then
+                    -- Skip the player slot (we never invite ourselves).
+                    if (slot._EchoesMember and slot._EchoesMember.isPlayer) or (slot.cycleBtn and slot.cycleBtn._EchoesLocked) then
+                        self._EchoesPlannedTalentByPos[g][p] = nil
+                    else
                     local dd = slot.classDrop
                     local value = dd._EchoesSelectedValue or dd.value or 1
                     local classText = slotValues[value]
 
+                    local specLabel = (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
+                    if classText and classText ~= "None" then
+                        self._EchoesPlannedTalentByPos[g][p] = { classText = tostring(classText), specLabel = tostring(specLabel) }
+                    else
+                        self._EchoesPlannedTalentByPos[g][p] = nil
+                    end
+
+                    -- Only invite empty (not currently occupied) slots.
+                    if slot._EchoesMember then
+                        -- Keep planned spec, but don't re-invite.
+                    else
+
                     if classText == "Altbot" then
                         local name = dd._EchoesAltbotName
-                        if name and tostring(name):gsub("^%s+", ""):gsub("%s+$", "") ~= "" then
-                            actions[#actions + 1] = { kind = "invite", name = tostring(name) }
+                        name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        if name ~= "" then
+                            local addClassCmd = NormalizeAltbotToAddClassCmd(name)
+                            if addClassCmd then
+                                actions[#actions + 1] = {
+                                    kind = "chat_wait_hello",
+                                    msg = ".playerbots bot addclass " .. addClassCmd,
+                                    channel = "GUILD",
+                                    helloTimeout = 2.5,
+                                    postInviteTimeout = 2.5,
+                                    plan = { classText = tostring(classText or ""), specLabel = tostring(specLabel or ""), group = g, slot = p },
+                                }
+                            else
+                                local norm = Echoes_NormalizeName(name)
+                                if norm ~= "" then
+                                    self._EchoesInviteExpectedByName[norm:lower()] = norm
+                                end
+                                if not seenAddByName[name:lower()] then
+                                    seenAddByName[name:lower()] = true
+                                    actions[#actions + 1] = {
+                                        kind = "chat_wait_hello",
+                                        msg = ".playerbots bot add " .. name,
+                                        channel = "GUILD",
+                                        helloTimeout = 2.5,
+                                        postInviteTimeout = 2.5,
+                                        plan = { classText = tostring(classText or ""), specLabel = tostring(specLabel or ""), group = g, slot = p },
+                                    }
+                                end
+                            end
                         end
                     elseif classText and classText ~= "None" then
                         local cmd = displayToCmd[classText]
                         if cmd then
-                            actions[#actions + 1] = { kind = "chat", msg = ".playerbots bot addclass " .. cmd, channel = "GUILD" }
+                            actions[#actions + 1] = {
+                                kind = "chat_wait_hello",
+                                msg = ".playerbots bot addclass " .. cmd,
+                                channel = "GUILD",
+                                helloTimeout = 2.5,
+                                postInviteTimeout = 2.5,
+                                plan = { classText = tostring(classText or ""), specLabel = tostring(specLabel or ""), group = g, slot = p },
+                            }
                         end
+                    end
+
+                    end
                     end
                 end
             end
@@ -2496,7 +2845,41 @@ function Echoes:BuildGroupTab(container)
         end
 
         Echoes_Print("Inviting...")
-        self:RunActionQueue(actions, 0.35)
+        -- Requirement: never run invite commands faster than every 0.7s.
+        self:RunActionQueue(actions, 0.70, function()
+            -- Give whispers/roster a moment to land, then invite any missing bots by name.
+            self:RunAfter(1.2, function()
+                local missing = {}
+                local dedupe = {}
+
+                local function QueueInvite(name)
+                    name = Echoes_NormalizeName(name)
+                    if name == "" then return end
+                    local k = name:lower()
+                    if dedupe[k] then return end
+                    if Echoes_IsNameInGroup(name) then return end
+                    dedupe[k] = true
+                    missing[#missing + 1] = { kind = "invite", name = name }
+                end
+
+                -- 1) Bots that whispered "Hello!"
+                for nm, _ in pairs(self._EchoesInviteHelloFrom or {}) do
+                    QueueInvite(nm)
+                end
+
+                -- 2) Named altbots we explicitly requested
+                for _, nm in pairs(self._EchoesInviteExpectedByName or {}) do
+                    QueueInvite(nm)
+                end
+
+                if #missing > 0 then
+                    Echoes_Print("Inviting missing bots...")
+                    self:RunActionQueue(missing, 0.70)
+                end
+
+                self._EchoesInviteSessionActive = false
+            end)
+        end)
     end)
     actionCol:AddChild(inviteBtn)
     SkinButton(inviteBtn)
@@ -2520,7 +2903,14 @@ function Echoes:BuildGroupTab(container)
                 local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
                 local member = slot and slot._EchoesMember or nil
                 if member and not member.isPlayer and member.name and member.name ~= "" then
-                    local spec = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or ""
+                    local byName = nil
+                    if self._EchoesPlannedTalentByName then
+                        local nk = Echoes_NormalizeName(member.name):lower()
+                        byName = self._EchoesPlannedTalentByName[nk]
+                    end
+
+                    local planned = self._EchoesPlannedTalentByPos and self._EchoesPlannedTalentByPos[g] and self._EchoesPlannedTalentByPos[g][p]
+                    local spec = (byName and byName.specLabel) or (planned and planned.specLabel) or (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
                     local classText = nil
                     if member.classFile then
                         for disp, classFile in pairs(DISPLAY_TO_CLASSFILE) do
@@ -2731,15 +3121,24 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
 
         if slot.cycleBtn then
+            local byName = nil
+            if member.name and self._EchoesPlannedTalentByName then
+                local nk = Echoes_NormalizeName(member.name):lower()
+                byName = self._EchoesPlannedTalentByName[nk]
+            end
+
+            local planned = self._EchoesPlannedTalentByPos and self._EchoesPlannedTalentByPos[member.subgroup or 0] and self._EchoesPlannedTalentByPos[member.subgroup or 0][member.pos or 0]
+            local keepLabel = (byName and byName.specLabel and tostring(byName.specLabel) ~= "") and tostring(byName.specLabel)
+                or ((planned and planned.specLabel and tostring(planned.specLabel) ~= "") and tostring(planned.specLabel))
+                or slot.cycleBtn._EchoesSpecLabel
             local classIndex = Echoes_GetGroupSlotIndexForClassFile(member.classFile)
             local display = (classIndex and self.UI._GroupSlotSlotValues and self.UI._GroupSlotSlotValues[classIndex]) or nil
             local vals = GetCycleValuesForRightText(display)
 
+            -- Do not auto-reset the chosen spec icon when a member fills a slot.
+            -- If class changes, try to keep the same label; otherwise keep the same index.
             slot.cycleBtn._EchoesLastClassFile = slot.cycleBtn._EchoesLastClassFile or member.classFile
-            if slot.cycleBtn._EchoesLastClassFile ~= member.classFile then
-                slot.cycleBtn.index = 1
-                slot.cycleBtn._EchoesLastClassFile = member.classFile
-            end
+            slot.cycleBtn._EchoesLastClassFile = member.classFile
 
             slot.cycleBtn.values = { unpack(vals) }
 
@@ -2749,6 +3148,17 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                 if wantLabel then
                     for i, it in ipairs(slot.cycleBtn.values) do
                         if type(it) == "table" and it.label == wantLabel then
+                            slot.cycleBtn.index = i
+                            break
+                        end
+                    end
+                end
+            end
+
+            if not member.isPlayer then
+                if keepLabel and keepLabel ~= "" then
+                    for i, it in ipairs(slot.cycleBtn.values) do
+                        if type(it) == "table" and it.label == keepLabel then
                             slot.cycleBtn.index = i
                             break
                         end
@@ -2830,6 +3240,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             if slot then
                 local member = membersByGroup[group] and membersByGroup[group][pos] or nil
                 if member then
+                    member.subgroup = group
+                    member.pos = pos
                     FillSlot(slot, member)
                 else
                     -- Preserve user-selected template values for empty slots, unless the slot
@@ -3046,6 +3458,40 @@ function Echoes:OnEnable()
     self:RegisterEvent("PARTY_MEMBERS_CHANGED", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("PLAYER_TALENT_UPDATE", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED", "OnEchoesRosterOrSpecChanged")
+
+    -- Bot "Hello!" whisper detection for invite verification.
+    self:RegisterEvent("CHAT_MSG_WHISPER", "OnEchoesChatMsgWhisper")
+end
+
+function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
+    if not self._EchoesInviteSessionActive then return end
+
+    msg = tostring(msg or "")
+    msg = msg:gsub("^%s+", ""):gsub("%s+$", "")
+    if msg ~= "Hello!" then return end
+
+    author = Echoes_NormalizeName(author)
+    if author == "" then return end
+
+    self._EchoesInviteHelloFrom = self._EchoesInviteHelloFrom or {}
+    self._EchoesInviteHelloFrom[author] = true
+
+    -- If the invite queue is waiting for a Hello handshake, bind this sender to the current step.
+    if self._EchoesWaitHelloActive and (not self._EchoesWaitHelloName or self._EchoesWaitHelloName == "") then
+        self._EchoesWaitHelloName = author
+
+        -- Lock in the planned spec/class for this bot name so party->raid reordering doesn't lose it.
+        if self._EchoesWaitHelloPlan and type(self._EchoesWaitHelloPlan) == "table" then
+            self._EchoesPlannedTalentByName = self._EchoesPlannedTalentByName or {}
+            local k = author:lower()
+            self._EchoesPlannedTalentByName[k] = {
+                classText = tostring(self._EchoesWaitHelloPlan.classText or ""),
+                specLabel = tostring(self._EchoesWaitHelloPlan.specLabel or ""),
+                group = tonumber(self._EchoesWaitHelloPlan.group) or nil,
+                slot = tonumber(self._EchoesWaitHelloPlan.slot) or nil,
+            }
+        end
+    end
 end
 
 function Echoes:OnEchoesRosterOrSpecChanged()
