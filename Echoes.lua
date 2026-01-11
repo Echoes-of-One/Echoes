@@ -128,6 +128,50 @@ local ECHOES_BACKDROP = {
     insets   = { left = 1, right = 1, top = 1, bottom = 1 },
 }
 
+-- Keep Echoes font rendering consistent and isolated from other addons that
+-- modify Blizzard's shared FontObjects (GameFontNormal, etc.).
+local ECHOES_FONT_PATH = "Fonts\\FRIZQT__.TTF"
+local ECHOES_FONT_FLAGS = "OUTLINE"
+
+local function SetEchoesFont(fontString, size, flags)
+    if not fontString or not fontString.SetFont then return end
+    fontString:SetFont(ECHOES_FONT_PATH, tonumber(size) or 12, flags or ECHOES_FONT_FLAGS)
+end
+
+local function StripFrameTextures(frame)
+    if not frame then return end
+    if frame.SetNormalTexture then frame:SetNormalTexture(nil) end
+    if frame.SetPushedTexture then frame:SetPushedTexture(nil) end
+    if frame.SetHighlightTexture then frame:SetHighlightTexture(nil) end
+    if frame.SetDisabledTexture then frame:SetDisabledTexture(nil) end
+
+    if frame.GetNormalTexture then
+        local t = frame:GetNormalTexture()
+        if t and t.SetTexture then t:SetTexture(nil) end
+    end
+    if frame.GetPushedTexture then
+        local t = frame:GetPushedTexture()
+        if t and t.SetTexture then t:SetTexture(nil) end
+    end
+    if frame.GetHighlightTexture then
+        local t = frame:GetHighlightTexture()
+        if t and t.SetTexture then t:SetTexture(nil) end
+    end
+    if frame.GetDisabledTexture then
+        local t = frame:GetDisabledTexture()
+        if t and t.SetTexture then t:SetTexture(nil) end
+    end
+
+    if frame.GetRegions then
+        local regs = { frame:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") and r.SetTexture then
+                r:SetTexture(nil)
+            end
+        end
+    end
+end
+
 local function SkinBackdrop(frame, alpha)
     if not frame or not frame.SetBackdrop then return end
     frame:SetBackdrop(ECHOES_BACKDROP)
@@ -218,8 +262,7 @@ local function SkinMainFrame(widget)
         widget.titletext:ClearAllPoints()
         widget.titletext:SetPoint("CENTER", f.EchoesTitleBar, "CENTER", 0, 0)
         widget.titletext:SetTextColor(0.95, 0.95, 0.95, 1)
-        local font, size, flags = widget.titletext:GetFont()
-        widget.titletext:SetFont(font, (size or 14) + 1, "OUTLINE")
+        SetEchoesFont(widget.titletext, 15, ECHOES_FONT_FLAGS)
     end
 
     ------------------------------------------------
@@ -304,12 +347,12 @@ local function SkinMainFrame(widget)
         if cb.RegisterForClicks then cb:RegisterForClicks("AnyUp") end
         SkinBackdrop(cb, 0.9)
 
-        local fs = cb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local fs = cb:CreateFontString(nil, "OVERLAY")
         fs:SetPoint("CENTER")
-        fs:SetText("Close")
         fs:SetTextColor(0.9, 0.8, 0.5, 1)
-        local font, size, flags = fs:GetFont()
-        fs:SetFont(font, math.max(10, (size or 12)), "OUTLINE")
+        SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
+        fs:SetText("Close")
+        cb._EchoesLabel = fs
 
         cb:HookScript("OnEnter", function(self)
             self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
@@ -334,13 +377,13 @@ local function SkinMainFrame(widget)
         if sb.RegisterForClicks then sb:RegisterForClicks("AnyUp") end
         SkinBackdrop(sb, 0.9)
 
-        local fs = sb:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local fs = sb:CreateFontString(nil, "OVERLAY")
         fs:SetPoint("CENTER")
         fs:SetJustifyH("CENTER")
-        fs:SetText("Toggle Spec Panel")
         fs:SetTextColor(0.9, 0.8, 0.5, 1)
-        local font, size, flags = fs:GetFont()
-        fs:SetFont(font, math.max(10, (size or 12)), "OUTLINE")
+        SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
+        fs:SetText("Toggle Spec Panel")
+        sb._EchoesLabel = fs
 
         sb:HookScript("OnEnter", function(self)
             self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
@@ -413,6 +456,36 @@ local function SkinMainFrame(widget)
                 end
             end
         end
+    end
+
+    -- Re-assert our theme on show (Echoes-only frame) in case another addon
+    -- applies a generic skin pass after creation.
+    if not f._EchoesSkinOnShowHooked then
+        f._EchoesSkinOnShowHooked = true
+        f:HookScript("OnShow", function(self)
+            SkinBackdrop(self, 0.95)
+            if self.SetBackdropBorderColor then
+                self:SetBackdropBorderColor(0, 0, 0, 0.85)
+            end
+            if self.content then
+                SkinBackdrop(self.content, 0.6)
+                if self.content.SetBackdropBorderColor then
+                    self.content:SetBackdropBorderColor(0, 0, 0, 0)
+                end
+            end
+            if self.EchoesTitleBar then
+                SkinBackdrop(self.EchoesTitleBar, 0.98)
+                if self.EchoesTitleBar.SetBackdropBorderColor then
+                    self.EchoesTitleBar:SetBackdropBorderColor(0, 0, 0, 0)
+                end
+            end
+            if self.EchoesCloseButton and self.EchoesCloseButton._EchoesLabel then
+                SetEchoesFont(self.EchoesCloseButton._EchoesLabel, 12, ECHOES_FONT_FLAGS)
+            end
+            if self.EchoesSpecButton and self.EchoesSpecButton._EchoesLabel then
+                SetEchoesFont(self.EchoesSpecButton._EchoesLabel, 12, ECHOES_FONT_FLAGS)
+            end
+        end)
     end
 end
 
@@ -497,15 +570,17 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
 
     SkinBackdrop(f, 0.92)
 
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local title = f:CreateFontString(nil, "OVERLAY")
     title:SetPoint("TOP", f, "TOP", 0, -6)
     title:SetTextColor(0.9, 0.8, 0.5, 1)
+    SetEchoesFont(title, 12, ECHOES_FONT_FLAGS)
     title:SetText("Spec Panel")
     f._EchoesTitle = title
 
-    local noTargetLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local noTargetLabel = f:CreateFontString(nil, "OVERLAY")
     noTargetLabel:SetPoint("CENTER", f, "CENTER", 0, -2)
     noTargetLabel:SetTextColor(0.7, 0.7, 0.7, 1)
+    SetEchoesFont(noTargetLabel, 12, ECHOES_FONT_FLAGS)
     noTargetLabel:SetText("<no target>")
     f._EchoesNoTargetLabel = noTargetLabel
 
@@ -636,6 +711,13 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
         self:_EchoesUpdateForTarget()
     end)
     f:SetScript("OnShow", function(self)
+        SkinBackdrop(self, 0.92)
+        if self._EchoesTitle then
+            SetEchoesFont(self._EchoesTitle, 12, ECHOES_FONT_FLAGS)
+        end
+        if self._EchoesNoTargetLabel then
+            SetEchoesFont(self._EchoesNoTargetLabel, 12, ECHOES_FONT_FLAGS)
+        end
         self:_EchoesUpdateForTarget()
     end)
 
@@ -725,9 +807,45 @@ local function SkinButton(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
 
-    if f.SetNormalTexture then f:SetNormalTexture(nil) end
-    if f.SetHighlightTexture then f:SetHighlightTexture(nil) end
-    if f.SetPushedTexture then f:SetPushedTexture(nil) end
+    -- AceGUI often uses Blizzard templates with multiple texture regions; strip all of them.
+    StripFrameTextures(f)
+
+    -- Re-assert stripping if another addon or the template scripts re-apply textures
+    -- when the button is shown/enabled/disabled.
+    if not f._EchoesSkinHooks then
+        f._EchoesSkinHooks = true
+        f:HookScript("OnShow", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+            local fs = self.GetFontString and self:GetFontString()
+            if fs then
+                fs:SetTextColor(0.90, 0.85, 0.70, 1)
+                SetEchoesFont(fs, 10, ECHOES_FONT_FLAGS)
+            end
+        end)
+        f:HookScript("OnMouseDown", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+            self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
+        end)
+        f:HookScript("OnMouseUp", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+        end)
+        f:HookScript("OnClick", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+        end)
+        f:HookScript("OnEnable", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+        end)
+        f:HookScript("OnDisable", function(self)
+            StripFrameTextures(self)
+            SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
+        end)
+    end
+    f._EchoesSkinAlpha = 0.7
 
     SkinBackdrop(f, 0.7)
 
@@ -740,8 +858,7 @@ local function SkinButton(widget)
 
     if widget.text and widget.text.SetTextColor then
         widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- gold-ish
-        local font, size, flags = widget.text:GetFont()
-        widget.text:SetFont(font, math.max(8, (size or 12) - 2), flags)
+        SetEchoesFont(widget.text, 10, ECHOES_FONT_FLAGS)
     end
 end
 
@@ -1031,11 +1148,10 @@ function Echoes:ShowNamePrompt(opts)
                 btn:SetSize(90, 22)
                 SkinBackdrop(btn, 0.9)
 
-                local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                local fs = btn:CreateFontString(nil, "OVERLAY")
                 fs:SetPoint("CENTER")
                 fs:SetTextColor(0.9, 0.8, 0.5, 1)
-                local font, size, flags = fs:GetFont()
-                fs:SetFont(font, math.max(10, (size or 12)), "OUTLINE")
+                SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
                 btn._EchoesLabel = fs
 
                 btn:HookScript("OnEnter", function(self)
@@ -1222,9 +1338,7 @@ local function SkinDropdown(widget)
         if not b._EchoesStyled then
             b._EchoesStyled = true
 
-            if b.SetNormalTexture then b:SetNormalTexture(nil) end
-            if b.SetPushedTexture then b:SetPushedTexture(nil) end
-            if b.SetHighlightTexture then b:SetHighlightTexture(nil) end
+            StripFrameTextures(b)
 
             b:ClearAllPoints()
             b:SetPoint("RIGHT", box, "RIGHT", -3, 0)
@@ -1233,15 +1347,6 @@ local function SkinDropdown(widget)
             SkinBackdrop(b, 0.95)
             b:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
             b:SetBackdropBorderColor(0, 0, 0, 1)
-
-            if b.GetRegions then
-                local regs = { b:GetRegions() }
-                for _, r in ipairs(regs) do
-                    if r and r.IsObjectType and r:IsObjectType("Texture") then
-                        r:SetTexture(nil)
-                    end
-                end
-            end
 
             local t = b:CreateTexture(nil, "ARTWORK")
             t:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
@@ -1287,6 +1392,7 @@ local function SkinDropdown(widget)
         if widget.text.SetTextColor then
             widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- match buttons
         end
+        SetEchoesFont(widget.text, 10, ECHOES_FONT_FLAGS)
     end
 
     -- Apply class colors to group-slot dropdowns (Echoes-only)
@@ -1322,6 +1428,10 @@ SkinEditBox = function(widget)
         widget.editbox:SetTextColor(0.90, 0.85, 0.70, 1)
     end
 
+    if widget.editbox.SetFont then
+        widget.editbox:SetFont(ECHOES_FONT_PATH, 11, "")
+    end
+
     -- Make text selection highlight obvious (default highlight can be too dark on our theme).
     if widget.editbox.SetHighlightColor then
         widget.editbox:SetHighlightColor(0.92, 0.92, 0.92, 0.45)
@@ -1336,11 +1446,17 @@ local function SkinHeading(widget)
     if widget and widget.label and widget.label.SetTextColor then
         widget.label:SetTextColor(0.95, 0.95, 0.95, 1)
     end
+    if widget and widget.label then
+        SetEchoesFont(widget.label, 12, ECHOES_FONT_FLAGS)
+    end
 end
 
 local function SkinLabel(widget)
     if widget and widget.label and widget.label.SetTextColor then
         widget.label:SetTextColor(0.85, 0.85, 0.85, 1)
+    end
+    if widget and widget.label then
+        SetEchoesFont(widget.label, 11, ECHOES_FONT_FLAGS)
     end
 end
 
@@ -2793,7 +2909,7 @@ function Echoes:BuildGroupTab(container)
     gridGroup:SetLayout("List")
     -- No border here so any leftover padding doesn't read as a giant boxed region.
     SkinInlineGroup(gridGroup, { border = false, alpha = 0.12 })
-    gridGroup:SetHeight((SLOT_GROUP_H * 2) + 26)
+    gridGroup:SetHeight((SLOT_GROUP_H * 2) + 34)
     container:AddChild(gridGroup)
 
     -- Inner padding + fixed row structure for cleaner alignment.
@@ -2806,17 +2922,19 @@ function Echoes:BuildGroupTab(container)
     if gridPadTop.SetAutoAdjustHeight then
         gridPadTop:SetAutoAdjustHeight(false)
     end
-    gridPadTop:SetHeight(-30)
+    gridPadTop:SetHeight(4)
     gridGroup:AddChild(gridPadTop)
 
     local gridRow1 = AceGUI:Create("SimpleGroup")
     gridRow1:SetFullWidth(true)
     gridRow1:SetLayout("Flow")
+    gridRow1:SetHeight(SLOT_GROUP_H)
     gridGroup:AddChild(gridRow1)
 
     local gridRow2 = AceGUI:Create("SimpleGroup")
     gridRow2:SetFullWidth(true)
     gridRow2:SetLayout("Flow")
+    gridRow2:SetHeight(SLOT_GROUP_H)
     gridGroup:AddChild(gridRow2)
 
     -- Layout groups in a 3x2 grid (3 on first row, 2 on second row)
@@ -2899,7 +3017,8 @@ function Echoes:BuildGroupTab(container)
         col:SetLayout("List")
         -- 3 columns per row; Flow will wrap the remaining groups to row 2.
         -- Slightly wider columns so the right-side button text doesn't clip.
-        col:SetRelativeWidth(0.333)
+        -- Leave plenty of headroom for Flow spacing so columns don't wrap.
+        col:SetRelativeWidth(0.30)
         col:SetHeight(SLOT_GROUP_H)
         SkinInlineGroup(col, { border = false, alpha = 0.28 })
         if colIndex <= 3 then
@@ -3135,7 +3254,8 @@ function Echoes:BuildGroupTab(container)
         if actionCol.titletext.Hide then actionCol.titletext:Hide() end
     end
     actionCol:SetLayout("List")
-    actionCol:SetRelativeWidth(0.333)
+    -- Leave plenty of headroom for Flow spacing so this doesn't wrap into a new row.
+    actionCol:SetRelativeWidth(0.30)
     actionCol:SetHeight(SLOT_GROUP_H)
     SkinInlineGroup(actionCol, { border = false, alpha = 0.28 })
     gridRow2:AddChild(actionCol)
@@ -4219,7 +4339,7 @@ end
 function Echoes:BuildMinimapButton()
     if MinimapBtn then return end
 
-    local b = CreateFrame("Button", "EchoesMinimapButton", Minimap)
+    local b = CreateFrame("Button", nil, Minimap)
     MinimapBtn = b
     b:SetSize(32, 32)
     b:SetFrameStrata("MEDIUM")
@@ -4233,11 +4353,11 @@ function Echoes:BuildMinimapButton()
     border:SetSize(54, 54)
     border:SetPoint("CENTER", b, "CENTER", 10, -12)
 
-    local label = b:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local label = b:CreateFontString(nil, "OVERLAY")
     label:SetPoint("CENTER", b, "CENTER", 0, 0)
-    label:SetText("E")
     label:SetTextColor(0.95, 0.82, 0.25, 1)
-    label:SetFont(label:GetFont(), 16, "OUTLINE")
+    SetEchoesFont(label, 16, ECHOES_FONT_FLAGS)
+    label:SetText("E")
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
