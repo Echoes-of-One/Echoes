@@ -10,6 +10,17 @@ local AceConsole = LibStub("AceConsole-3.0")
 local AceEvent   = LibStub("AceEvent-3.0")
 local AceGUI     = LibStub("AceGUI-3.0")
 
+-- Lua compatibility: some environments provide `table.unpack` but not global `unpack`.
+local t_unpack = (type(table) == "table" and type(table.unpack) == "function" and table.unpack) or unpack
+if type(t_unpack) ~= "function" then
+    t_unpack = function(t, i, j)
+        i = i or 1
+        j = j or #t
+        if i > j then return end
+        return t[i], t_unpack(t, i + 1, j)
+    end
+end
+
 local Echoes = AceAddon:NewAddon("Echoes", "AceConsole-3.0", "AceEvent-3.0")
 
 ------------------------------------------------------------
@@ -113,7 +124,8 @@ end
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 local FRAME_SIZES = {
     BOT    = { w = 320, h = 470 },
-    GROUP  = { w = 650, h = 490 },
+    -- A bit larger so Group Creation uses more of the pane (and Altbot Name doesn't truncate).
+    GROUP  = { w = 740, h = 520 },
     ECHOES = { w = 320, h = 360 },
 }
 
@@ -165,7 +177,9 @@ local function StripFrameTextures(frame)
     if frame.GetRegions then
         local regs = { frame:GetRegions() }
         for _, r in ipairs(regs) do
-            if r and r.IsObjectType and r:IsObjectType("Texture") and r.SetTexture then
+            if r and r._EchoesNoStrip then
+                -- Preserve custom textures we add (e.g., spec cycle icons)
+            elseif r and r.IsObjectType and r:IsObjectType("Texture") and r.SetTexture then
                 r:SetTexture(nil)
             end
         end
@@ -1925,7 +1939,11 @@ function Echoes:ApplyFrameSizeForTab(key)
     local screenH = (GetScreenHeight and GetScreenHeight()) or (UIParent and UIParent.GetHeight and UIParent:GetHeight()) or s.h
 
     -- Margins (in screen pixels) to avoid clipping the window against edges.
+    -- GROUP tends to need more vertical room; allow a slightly smaller margin.
     local marginX, marginY = 120, 160
+    if key == "GROUP" then
+        marginY = 80
+    end
     local maxW = (screenW - marginX) / scale
     local maxH = (screenH - marginY) / scale
 
@@ -2115,20 +2133,25 @@ function Echoes:BuildBotTab(container)
     ------------------------------------------------
     local classGroup = AceGUI:Create("SimpleGroup")
     classGroup:SetFullWidth(true)
-    classGroup:SetLayout("Flow")
+    classGroup:SetLayout("None")
+    if classGroup.SetAutoAdjustHeight then classGroup:SetAutoAdjustHeight(false) end
+    classGroup:SetHeight(ROW_H)
     container:AddChild(classGroup)
-
-    local padL = AceGUI:Create("Label")
-    padL:SetText("")
-    padL:SetRelativeWidth(0.02)
-    classGroup:AddChild(padL)
 
     -- Inline "Class" label
     local classLabel = AceGUI:Create("Label")
     classLabel:SetText("Class")
-    classLabel:SetRelativeWidth(0.14)
+    classLabel:SetWidth(50)
+    classLabel:SetHeight(ROW_H)
     classGroup:AddChild(classLabel)
     SkinLabel(classLabel)
+
+    if classLabel.frame and classGroup.frame then
+        classLabel.frame:ClearAllPoints()
+        classLabel.frame:SetPoint("LEFT", classGroup.frame, "LEFT", 10, 0)
+        classLabel.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
+        classLabel.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
+    end
 
 
     local classValues = {}
@@ -2140,7 +2163,6 @@ function Echoes:BuildBotTab(container)
     classDrop:SetLabel("")
     classDrop:SetList(classValues)
     classDrop:SetValue(EchoesDB.classIndex or 1)
-    classDrop:SetRelativeWidth(0.46)
     classDrop:SetHeight(ROW_H)
     classGroup:AddChild(classDrop)
     SkinDropdown(classDrop)
@@ -2193,14 +2215,9 @@ function Echoes:BuildBotTab(container)
         ApplyBotClassDropdownColor(idx)
     end
 
-    local classSpacer = AceGUI:Create("SimpleGroup")
-    classSpacer:SetRelativeWidth(0.04)
-    classSpacer:SetLayout("Flow")
-    classGroup:AddChild(classSpacer)
-
     local prevBtn = AceGUI:Create("Button")
     prevBtn:SetText("<")
-    prevBtn:SetRelativeWidth(0.16)
+    prevBtn:SetWidth(42)
     prevBtn:SetHeight(ROW_H)
     prevBtn:SetCallback("OnClick", function()
         SetClassIndex((EchoesDB.classIndex or 1) - 1)
@@ -2210,7 +2227,7 @@ function Echoes:BuildBotTab(container)
 
     local nextBtn = AceGUI:Create("Button")
     nextBtn:SetText(">")
-    nextBtn:SetRelativeWidth(0.16)
+    nextBtn:SetWidth(42)
     nextBtn:SetHeight(ROW_H)
     nextBtn:SetCallback("OnClick", function()
         SetClassIndex((EchoesDB.classIndex or 1) + 1)
@@ -2218,13 +2235,25 @@ function Echoes:BuildBotTab(container)
     classGroup:AddChild(nextBtn)
     SkinButton(nextBtn)
 
-    -- right padding (~15px)
-    local padR = AceGUI:Create("Label")
-    padR:SetText("")
-    padR:SetRelativeWidth(0.02)
-    classGroup:AddChild(padR)
-
-    classGroup:SetHeight(ROW_H + 4)
+    if nextBtn.frame and classGroup.frame then
+        nextBtn.frame:ClearAllPoints()
+        nextBtn.frame:SetPoint("RIGHT", classGroup.frame, "RIGHT", -10, 0)
+        nextBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
+        nextBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
+    end
+    if prevBtn.frame and nextBtn.frame then
+        prevBtn.frame:ClearAllPoints()
+        prevBtn.frame:SetPoint("RIGHT", nextBtn.frame, "LEFT", -6, 0)
+        prevBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
+        prevBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
+    end
+    if classDrop.frame and classGroup.frame and classLabel.frame and prevBtn.frame then
+        classDrop.frame:ClearAllPoints()
+        classDrop.frame:SetPoint("LEFT", classLabel.frame, "RIGHT", 10, 0)
+        classDrop.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
+        classDrop.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
+        classDrop.frame:SetPoint("RIGHT", prevBtn.frame, "LEFT", -10, 0)
+    end
 
     ------------------------------------------------
     -- 2) Add / Remove row (centered)
@@ -2445,12 +2474,16 @@ end
 -- Group Creation tab (unchanged layout)
 ------------------------------------------------------------
 function Echoes:BuildGroupTab(container)
+    -- Flat pane (no scrolling). The GROUP frame size is designed to fit the full grid.
     container:SetLayout("List")
 
-    local INPUT_HEIGHT = 24
+    -- Row height for slot rows. Keep everything on one line (icon + dropdown + optional Name button).
+    -- Slightly taller for readability, but not so tall that the 5x2 grid wastes space.
+    local INPUT_HEIGHT = 22
+    local ROW_H = INPUT_HEIGHT
     -- Compact, consistent height for the group slot grid. Without explicit heights,
     -- AceGUI containers default to a fairly tall value which looks like a huge empty panel.
-    local SLOT_GROUP_H = (5 * INPUT_HEIGHT) + 24
+    local SLOT_GROUP_H = (5 * ROW_H) + 26
 
     local PRESET_COUNT = #GROUP_TEMPLATES
     -- Use a large numeric key so AceGUI's sorted dropdown puts this at the end.
@@ -2484,37 +2517,37 @@ function Echoes:BuildGroupTab(container)
 
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
-    topGroup:SetLayout("Flow")
+    -- Anchor header widgets manually so the EditBox and Dropdown line up perfectly.
+    topGroup:SetLayout("None")
+    if topGroup.SetAutoAdjustHeight then topGroup:SetAutoAdjustHeight(false) end
+    topGroup:SetHeight(INPUT_HEIGHT)
     SkinSimpleGroup(topGroup)
     container:AddChild(topGroup)
-
-    local headerPadL = AceGUI:Create("SimpleGroup")
-    headerPadL:SetRelativeWidth(0.008)
-    headerPadL:SetLayout("Flow")
-    topGroup:AddChild(headerPadL)
 
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
     nameEdit:SetText("")
-    nameEdit:SetRelativeWidth(0.33)
     nameEdit:SetHeight(INPUT_HEIGHT)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
     if nameEdit.DisableButton then nameEdit:DisableButton(true) end
 
-    local topSpacer = AceGUI:Create("SimpleGroup")
-    topSpacer:SetRelativeWidth(0.015)
-    topSpacer:SetLayout("Flow")
-    topGroup:AddChild(topSpacer)
+    if nameEdit.frame and topGroup.frame then
+        nameEdit.frame:ClearAllPoints()
+        nameEdit.frame:SetPoint("TOPLEFT", topGroup.frame, "TOPLEFT", 8, 0)
+        nameEdit.frame:SetPoint("BOTTOMLEFT", topGroup.frame, "BOTTOMLEFT", 8, 0)
+        if nameEdit.frame.SetWidth then nameEdit.frame:SetWidth(240) end
+    end
 
     local function GetTemplateDisplayName(i)
         i = tonumber(i)
         if not i then return "" end
-        if i <= PRESET_COUNT then
-            return GROUP_TEMPLATES[i] or ("Template " .. tostring(i))
-        end
+        -- Allow user-defined names even for built-in presets.
         if EchoesDB.groupTemplateNames and EchoesDB.groupTemplateNames[i] and EchoesDB.groupTemplateNames[i] ~= "" then
             return tostring(EchoesDB.groupTemplateNames[i])
+        end
+        if i <= PRESET_COUNT then
+            return GROUP_TEMPLATES[i] or ("Template " .. tostring(i))
         end
         local tpl = EchoesDB.groupTemplates and EchoesDB.groupTemplates[i]
         if tpl and tpl.name and tpl.name ~= "" then
@@ -2539,7 +2572,6 @@ function Echoes:BuildGroupTab(container)
     templateDrop:SetLabel("")
     templateDrop:SetList(templateValues)
     templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
-    templateDrop:SetRelativeWidth(0.33)
     templateDrop:SetHeight(INPUT_HEIGHT)
     self.UI.groupTemplateNameEdit = nameEdit
     self.UI.groupTemplateDrop = templateDrop
@@ -2571,7 +2603,8 @@ function Echoes:BuildGroupTab(container)
             nameEdit:SetText(displayName or "")
         end
 
-        local allowRename = (idx and idx > PRESET_COUNT) and true or false
+        -- Allow renaming any preset (including 10/25) since we also allow saving over them.
+        local allowRename = true
         if nameEdit and nameEdit.SetDisabled then
             nameEdit:SetDisabled(not allowRename)
         end
@@ -2583,10 +2616,10 @@ function Echoes:BuildGroupTab(container)
             end
         end
 
-        -- Disable Save/Delete for built-in presets.
-        local allowSaveDelete = (idx and idx > PRESET_COUNT) and true or false
-        SetButtonEnabled(saveBtn, allowSaveDelete)
-        SetButtonEnabled(deleteBtn, allowSaveDelete)
+        -- Allow saving over built-in presets. Only block Delete on built-ins.
+        SetButtonEnabled(saveBtn, true)
+        local allowDelete = (idx and idx > PRESET_COUNT) and true or false
+        SetButtonEnabled(deleteBtn, allowDelete)
     end
 
     -- Forward declarations (used by template helpers below, populated later).
@@ -2623,7 +2656,7 @@ function Echoes:BuildGroupTab(container)
         end
 
         if slot.cycleBtn then
-            slot.cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            slot.cycleBtn.values = { t_unpack(DEFAULT_CYCLE_VALUES) }
             slot.cycleBtn.index = 1
             slot.cycleBtn._EchoesLocked = false
             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
@@ -2697,7 +2730,7 @@ function Echoes:BuildGroupTab(container)
 
                         if slot.cycleBtn then
                             local vals = GetCycleValuesForRightText(classText)
-                            slot.cycleBtn.values = { unpack(vals) }
+                            slot.cycleBtn.values = { t_unpack(vals) }
                             local want = entry.specLabel and tostring(entry.specLabel) or nil
                             local chosen = 1
                             if want and want ~= "" then
@@ -2726,7 +2759,6 @@ function Echoes:BuildGroupTab(container)
 
     local function SavePreset(templateIndex)
         local idx = tonumber(templateIndex) or 1
-        if idx <= PRESET_COUNT then return false end
         if not self.UI or not self.UI.groupSlots then return false end
 
         EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
@@ -2826,20 +2858,21 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(templateDrop)
     SkinDropdown(templateDrop)
 
-    RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
+    if templateDrop.frame and topGroup.frame and nameEdit.frame then
+        templateDrop.frame:ClearAllPoints()
+        templateDrop.frame:SetPoint("TOP", topGroup.frame, "TOP", 0, 0)
+        templateDrop.frame:SetPoint("BOTTOM", topGroup.frame, "BOTTOM", 0, 0)
+        templateDrop.frame:SetPoint("LEFT", nameEdit.frame, "RIGHT", 10, 0)
+        if templateDrop.frame.SetWidth then templateDrop.frame:SetWidth(240) end
+    end
 
-    local topSpacer2 = AceGUI:Create("SimpleGroup")
-    topSpacer2:SetRelativeWidth(0.015)
-    topSpacer2:SetLayout("Flow")
-    topGroup:AddChild(topSpacer2)
+    RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
 
     saveBtn = AceGUI:Create("Button")
     saveBtn:SetText("Save")
-    saveBtn:SetRelativeWidth(0.145)
     saveBtn:SetHeight(INPUT_HEIGHT)
     saveBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
-        if idx <= PRESET_COUNT then return end
         if not SavePreset(idx) then return end
 
         local vals = BuildTemplateValues()
@@ -2853,9 +2886,16 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(saveBtn)
     SkinButton(saveBtn)
 
+    if saveBtn.frame and topGroup.frame and templateDrop.frame then
+        saveBtn.frame:ClearAllPoints()
+        saveBtn.frame:SetPoint("TOP", topGroup.frame, "TOP", 0, 0)
+        saveBtn.frame:SetPoint("BOTTOM", topGroup.frame, "BOTTOM", 0, 0)
+        saveBtn.frame:SetPoint("LEFT", templateDrop.frame, "RIGHT", 10, 0)
+        if saveBtn.frame.SetWidth then saveBtn.frame:SetWidth(88) end
+    end
+
     deleteBtn = AceGUI:Create("Button")
     deleteBtn:SetText("Delete")
-    deleteBtn:SetRelativeWidth(0.145)
     deleteBtn:SetHeight(INPUT_HEIGHT)
     deleteBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
@@ -2887,13 +2927,24 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(deleteBtn)
     SkinButton(deleteBtn)
 
+    if deleteBtn.frame and topGroup.frame and saveBtn.frame then
+        deleteBtn.frame:ClearAllPoints()
+        deleteBtn.frame:SetPoint("TOPRIGHT", topGroup.frame, "TOPRIGHT", -8, 0)
+        deleteBtn.frame:SetPoint("BOTTOMRIGHT", topGroup.frame, "BOTTOMRIGHT", -8, 0)
+        if deleteBtn.frame.SetWidth then deleteBtn.frame:SetWidth(88) end
+    end
+
+    -- Ensure Save stays just left of Delete.
+    if saveBtn.frame and deleteBtn.frame then
+        saveBtn.frame:ClearAllPoints()
+        saveBtn.frame:SetPoint("TOP", topGroup.frame, "TOP", 0, 0)
+        saveBtn.frame:SetPoint("BOTTOM", topGroup.frame, "BOTTOM", 0, 0)
+        saveBtn.frame:SetPoint("RIGHT", deleteBtn.frame, "LEFT", -10, 0)
+        if saveBtn.frame.SetWidth then saveBtn.frame:SetWidth(88) end
+    end
+
     -- Apply initial disabled state
     RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
-
-    local headerPadR = AceGUI:Create("SimpleGroup")
-    headerPadR:SetRelativeWidth(0.008)
-    headerPadR:SetLayout("Flow")
-    topGroup:AddChild(headerPadR)
 
     local headerPadBottom = AceGUI:Create("SimpleGroup")
     headerPadBottom:SetFullWidth(true)
@@ -2922,7 +2973,7 @@ function Echoes:BuildGroupTab(container)
     if gridPadTop.SetAutoAdjustHeight then
         gridPadTop:SetAutoAdjustHeight(false)
     end
-    gridPadTop:SetHeight(4)
+    gridPadTop:SetHeight(2)
     gridGroup:AddChild(gridPadTop)
 
     local gridRow1 = AceGUI:Create("SimpleGroup")
@@ -3018,7 +3069,8 @@ function Echoes:BuildGroupTab(container)
         -- 3 columns per row; Flow will wrap the remaining groups to row 2.
         -- Slightly wider columns so the right-side button text doesn't clip.
         -- Leave plenty of headroom for Flow spacing so columns don't wrap.
-        col:SetRelativeWidth(0.30)
+        -- Slightly wider so the per-row widgets (especially Altbot Name) don't feel cramped.
+        col:SetRelativeWidth(0.325)
         col:SetHeight(SLOT_GROUP_H)
         SkinInlineGroup(col, { border = false, alpha = 0.28 })
         if colIndex <= 3 then
@@ -3032,8 +3084,13 @@ function Echoes:BuildGroupTab(container)
         for rowIndex = 1, cfg.rows do
             local rowGroup = AceGUI:Create("SimpleGroup")
             rowGroup:SetFullWidth(true)
-            rowGroup:SetLayout("Flow")
-            rowGroup:SetHeight(INPUT_HEIGHT)
+            -- IMPORTANT: avoid AceGUI "Flow" here. Mixing a fixed-width icon button with
+            -- relative-width dropdowns causes wrapping in some AceGUI/WotLK builds, which
+            -- makes the icon appear on a different line (looks misaligned).
+            -- We anchor children manually instead.
+            rowGroup:SetLayout("None")
+            if rowGroup.SetAutoAdjustHeight then rowGroup:SetAutoAdjustHeight(false) end
+            rowGroup:SetHeight(ROW_H)
             col:AddChild(rowGroup)
 
             local isPlayerSlot = false
@@ -3059,6 +3116,10 @@ function Echoes:BuildGroupTab(container)
 
                 if btn.frame and not btn._EchoesIconTex then
                     local t = btn.frame:CreateTexture(nil, "ARTWORK")
+                    t._EchoesNoStrip = true
+                    if t.SetDrawLayer then
+                        t:SetDrawLayer("OVERLAY")
+                    end
                     t:SetTexCoord(0.07, 0.93, 0.07, 0.93)
                     t:SetPoint("CENTER", btn.frame, "CENTER", 0, 0)
                     btn._EchoesIconTex = t
@@ -3099,9 +3160,9 @@ function Echoes:BuildGroupTab(container)
 
             cycleBtn = AceGUI:Create("Button")
             -- Keep this button perfectly square.
-            cycleBtn:SetWidth(INPUT_HEIGHT)
-            cycleBtn:SetHeight(INPUT_HEIGHT)
-            cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            cycleBtn:SetWidth(ROW_H)
+            cycleBtn:SetHeight(ROW_H)
+            cycleBtn.values = { t_unpack(DEFAULT_CYCLE_VALUES) }
             cycleBtn.index  = 1
             cycleBtn._EchoesCycleUpdate = CycleUpdate
 
@@ -3129,11 +3190,17 @@ function Echoes:BuildGroupTab(container)
             rowGroup:AddChild(cycleBtn)
             SkinButton(cycleBtn)
 
+            if cycleBtn.frame and rowGroup.frame then
+                cycleBtn.frame:ClearAllPoints()
+                cycleBtn.frame:SetPoint("TOPLEFT", rowGroup.frame, "TOPLEFT", 0, 0)
+                cycleBtn.frame:SetPoint("BOTTOMLEFT", rowGroup.frame, "BOTTOMLEFT", 0, 0)
+            end
+
             local nameBtn
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
             dd:SetValue(1)
-            dd:SetRelativeWidth(0.54)
+            dd:SetHeight(ROW_H)
 
             local function UpdateNameButtonVisibility(selectedValue)
                 local value = selectedValue or dd._EchoesSelectedValue or dd.value
@@ -3147,6 +3214,19 @@ function Echoes:BuildGroupTab(container)
                         if nameBtn.frame.SetAlpha then nameBtn.frame:SetAlpha(0) end
                         nameBtn.frame:Hide()
                         nameBtn.frame:EnableMouse(false)
+                    end
+                end
+
+                -- Re-anchor dropdown to either the Name button (when visible) or the row right edge.
+                if dd and dd.frame and rowGroup and rowGroup.frame and cycleBtn and cycleBtn.frame then
+                    dd.frame:ClearAllPoints()
+                    dd.frame:SetPoint("TOP", rowGroup.frame, "TOP", 0, 0)
+                    dd.frame:SetPoint("BOTTOM", rowGroup.frame, "BOTTOM", 0, 0)
+                    dd.frame:SetPoint("LEFT", cycleBtn.frame, "RIGHT", 8, 0)
+                    if showName and nameBtn and nameBtn.frame then
+                        dd.frame:SetPoint("RIGHT", nameBtn.frame, "LEFT", -6, 0)
+                    else
+                        dd.frame:SetPoint("RIGHT", rowGroup.frame, "RIGHT", 0, 0)
                     end
                 end
             end
@@ -3172,7 +3252,7 @@ function Echoes:BuildGroupTab(container)
                 local text = slotValues[value]
                 local vals = GetCycleValuesForRightText(text)
                 if cycleBtn then
-                    cycleBtn.values = { unpack(vals) }
+                    cycleBtn.values = { t_unpack(vals) }
                     cycleBtn.index  = 1
                     CycleUpdate(cycleBtn)
                 end
@@ -3185,12 +3265,21 @@ function Echoes:BuildGroupTab(container)
             rowGroup:AddChild(dd)
             SkinDropdown(dd)
 
+            -- Initial anchor (no Name button shown yet)
+            if dd.frame and rowGroup.frame and cycleBtn.frame then
+                dd.frame:ClearAllPoints()
+                dd.frame:SetPoint("TOP", rowGroup.frame, "TOP", 0, 0)
+                dd.frame:SetPoint("BOTTOM", rowGroup.frame, "BOTTOM", 0, 0)
+                dd.frame:SetPoint("LEFT", cycleBtn.frame, "RIGHT", 8, 0)
+                dd.frame:SetPoint("RIGHT", rowGroup.frame, "RIGHT", 0, 0)
+            end
+
             ApplyGroupSlotSelectedTextColor(dd, 1)
 
             nameBtn = AceGUI:Create("Button")
             nameBtn:SetText("Name")
-            nameBtn:SetRelativeWidth(0.32)
-            nameBtn:SetHeight(INPUT_HEIGHT)
+            nameBtn:SetWidth(80)
+            nameBtn:SetHeight(ROW_H)
             local function OnNameButtonClick()
                 if not ALTBOT_INDEX then return end
                 local cur = dd and (dd._EchoesSelectedValue or dd.value)
@@ -3224,6 +3313,12 @@ function Echoes:BuildGroupTab(container)
             rowGroup:AddChild(nameBtn)
             SkinButton(nameBtn)
 
+            if nameBtn.frame and rowGroup.frame then
+                nameBtn.frame:ClearAllPoints()
+                nameBtn.frame:SetPoint("TOPRIGHT", rowGroup.frame, "TOPRIGHT", 0, 0)
+                nameBtn.frame:SetPoint("BOTTOMRIGHT", rowGroup.frame, "BOTTOMRIGHT", 0, 0)
+            end
+
             -- Hide by default until Altbot is selected.
             if nameBtn.frame then
                 nameBtn.frame:Hide()
@@ -3235,7 +3330,7 @@ function Echoes:BuildGroupTab(container)
 
             if nameBtn.text and nameBtn.text.GetFont and nameBtn.text.SetFont then
                 local font, _, flags = nameBtn.text:GetFont()
-                nameBtn.text:SetFont(font, 8, flags)
+                nameBtn.text:SetFont(font, 9, flags)
             end
 
             self.UI.groupSlots[colIndex][rowIndex] = {
@@ -3255,7 +3350,7 @@ function Echoes:BuildGroupTab(container)
     end
     actionCol:SetLayout("List")
     -- Leave plenty of headroom for Flow spacing so this doesn't wrap into a new row.
-    actionCol:SetRelativeWidth(0.30)
+    actionCol:SetRelativeWidth(0.325)
     actionCol:SetHeight(SLOT_GROUP_H)
     SkinInlineGroup(actionCol, { border = false, alpha = 0.28 })
     gridRow2:AddChild(actionCol)
@@ -4014,7 +4109,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
 
         if slot.cycleBtn then
-            slot.cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            slot.cycleBtn.values = { t_unpack(DEFAULT_CYCLE_VALUES) }
             slot.cycleBtn.index = 1
             slot.cycleBtn._EchoesLocked = false
             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
@@ -4087,7 +4182,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             slot.cycleBtn._EchoesLastClassFile = slot.cycleBtn._EchoesLastClassFile or member.classFile
             slot.cycleBtn._EchoesLastClassFile = member.classFile
 
-            slot.cycleBtn.values = { unpack(vals) }
+            slot.cycleBtn.values = { t_unpack(vals) }
 
             -- For the player slot, auto-select the icon matching the player's actual spec.
             if member.isPlayer then
@@ -4227,81 +4322,25 @@ function Echoes:BuildEchoesTab(container)
 
     local scaleSlider = AceGUI:Create("Slider")
     scaleSlider:SetLabel("UI Scale")
-    scaleSlider:SetSliderValues(0.7, 1.3, 0.05)
+    scaleSlider:SetSliderValues(0.5, 2.0, 0.05)
     scaleSlider:SetValue(EchoesDB.uiScale or 1.0)
     scaleSlider:SetFullWidth(true)
+    -- IMPORTANT: applying scale while dragging the slider resizes the slider itself,
+    -- which can make AceGUI's Slider jump to the minimum due to the changing mouse/value mapping.
+    -- We only apply the scale after the user releases the mouse.
     scaleSlider:SetCallback("OnValueChanged", function(widget, event, value)
-        local v = tonumber(value) or 1.0
-        v = Clamp(v, 0.7, 1.3)
+        local v = tonumber(value) or (EchoesDB.uiScale or 1.0)
+        v = Clamp(v, 0.5, 2.0)
+        Echoes._EchoesPendingUiScale = v
+    end)
+    scaleSlider:SetCallback("OnMouseUp", function(widget, event, value)
+        local v = tonumber(value) or Echoes._EchoesPendingUiScale or (EchoesDB.uiScale or 1.0)
+        v = Clamp(v, 0.5, 2.0)
         EchoesDB.uiScale = v
+        Echoes._EchoesPendingUiScale = nil
         Echoes:ApplyScale()
     end)
     container:AddChild(scaleSlider)
-
-    local spacer = AceGUI:Create("Label")
-    spacer:SetText(" ")
-    spacer:SetFullWidth(true)
-    spacer:SetHeight(10)
-    container:AddChild(spacer)
-
-    local chatHeading = AceGUI:Create("Heading")
-    chatHeading:SetText("Command Sending")
-    chatHeading:SetFullWidth(true)
-    SkinHeading(chatHeading)
-    container:AddChild(chatHeading)
-
-    local sendAs = AceGUI:Create("CheckBox")
-    sendAs:SetLabel("Send commands to a chat channel")
-    sendAs:SetValue(EchoesDB.sendAsChat and true or false)
-    sendAs:SetFullWidth(true)
-    sendAs:SetCallback("OnValueChanged", function(widget, event, value)
-        EchoesDB.sendAsChat = value and true or false
-    end)
-    container:AddChild(sendAs)
-
-    local channelList = { "SAY", "PARTY", "RAID", "GUILD" }
-    local channelValues = {}
-    for i, v in ipairs(channelList) do channelValues[i] = v end
-
-    local channelDrop = AceGUI:Create("Dropdown")
-    channelDrop:SetLabel("Channel")
-    channelDrop:SetList(channelValues)
-    local cur = tostring(EchoesDB.chatChannel or "SAY")
-    local curIdx = 1
-    for i, v in ipairs(channelList) do
-        if v == cur then curIdx = i break end
-    end
-    channelDrop:SetValue(curIdx)
-    channelDrop:SetFullWidth(true)
-    channelDrop:SetCallback("OnValueChanged", function(widget, event, value)
-        local v = channelList[value] or "SAY"
-        EchoesDB.chatChannel = v
-    end)
-    container:AddChild(channelDrop)
-    SkinDropdown(channelDrop)
-
-    local talentsHeading = AceGUI:Create("Heading")
-    talentsHeading:SetText("Group Creation")
-    talentsHeading:SetFullWidth(true)
-    SkinHeading(talentsHeading)
-    container:AddChild(talentsHeading)
-
-    local tplDesc = AceGUI:Create("Label")
-    tplDesc:SetText("Talent Command template used by 'Set Talents'. Tokens: {name} {class} {spec} {group} {slot}")
-    tplDesc:SetFullWidth(true)
-    SkinLabel(tplDesc)
-    container:AddChild(tplDesc)
-
-    local talentCmd = AceGUI:Create("EditBox")
-    talentCmd:SetLabel("Talent Command")
-    talentCmd:SetText(EchoesDB.talentCommandTemplate or "")
-    talentCmd:SetFullWidth(true)
-    talentCmd:SetCallback("OnEnterPressed", function(widget, event, text)
-        EchoesDB.talentCommandTemplate = tostring(text or "")
-    end)
-    container:AddChild(talentCmd)
-    SkinEditBox(talentCmd)
-    if talentCmd.DisableButton then talentCmd:DisableButton(true) end
 end
 
 ------------------------------------------------------------

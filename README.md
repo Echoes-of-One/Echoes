@@ -8,8 +8,8 @@ It provides an Ace3-based window (draggable, ElvUI-ish dark skin) with quick act
 
 - WoW client: **3.3.5**
 - Library: **Ace3**
-  - This repo vendors Ace3 in the `Ace3/` folder.
-  - The release zip installs Ace3 as its own addon folder (see **Installation**).
+  - Echoes embeds Ace3 in `Echoes/Ace3/`, so it does **not** require a separate `Interface/AddOns/Ace3/` addon folder.
+  - If you do have a standalone Ace3 addon installed/enabled, it will safely coexist (duplicate libs are ignored by LibStub).
 
 ## Installation
 
@@ -23,14 +23,12 @@ It provides an Ace3-based window (draggable, ElvUI-ish dark skin) with quick act
 3. You should end up with:
 
 - `Interface/AddOns/Echoes/`
-- `Interface/AddOns/Ace3/`
 
 ### From source (this repo)
 
 This repository is already laid out like an addon folder.
 
 - Place the entire `Echoes/` folder into `Interface/AddOns/`.
-- Ensure `Ace3/` exists (it is included in this repo).
 
 ## Usage
 
