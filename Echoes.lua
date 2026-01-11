@@ -113,7 +113,7 @@ end
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 local FRAME_SIZES = {
     BOT    = { w = 320, h = 470 },
-    GROUP  = { w = 650, h = 520 },
+    GROUP  = { w = 650, h = 490 },
     ECHOES = { w = 320, h = 360 },
 }
 
@@ -348,16 +348,36 @@ local function SkinInlineGroup(widget, opts)
     if not widget or not widget.frame then return end
     opts = opts or {}
     local alpha = (opts.alpha ~= nil) and opts.alpha or 0.35
-    SkinBackdrop(widget.frame, alpha)
-    if widget.frame.SetBackdropBorderColor then
-        if opts.border == false then
-            widget.frame:SetBackdropBorderColor(0, 0, 0, 0)
-        else
-            widget.frame:SetBackdropBorderColor(0, 0, 0, 0.85)
+
+    -- IMPORTANT: In AceGUI-3.0 (WotLK 3.3.5), InlineGroup draws its visible box on a
+    -- private "border" frame that is the parent of widget.content. Skinning widget.frame
+    -- alone will not remove the boxes.
+    local borderFrame = (widget.content and widget.content.GetParent and widget.content:GetParent()) or widget.frame
+
+    if opts.border == false then
+        -- Borderless panel: keep subtle background, remove edge texture.
+        if borderFrame and borderFrame.SetBackdrop then
+            borderFrame:SetBackdrop({
+                bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+                edgeFile = nil,
+                tile = false,
+                tileSize = 0,
+                edgeSize = 0,
+                insets = { left = 0, right = 0, top = 0, bottom = 0 },
+            })
+            borderFrame:SetBackdropColor(0.06, 0.06, 0.06, alpha)
+            if borderFrame.SetBackdropBorderColor then
+                borderFrame:SetBackdropBorderColor(0, 0, 0, 0)
+            end
         end
-    end
-    if widget.border and widget.border.SetBackdrop then
-        widget.border:SetBackdrop(nil)
+    else
+        -- Bordered panel: apply our standard ElvUI-ish backdrop.
+        if borderFrame then
+            SkinBackdrop(borderFrame, alpha)
+            if borderFrame.SetBackdropBorderColor then
+                borderFrame:SetBackdropBorderColor(0, 0, 0, 0.85)
+            end
+        end
     end
 end
 
@@ -1630,6 +1650,10 @@ function Echoes:BuildBotTab(container)
     -- (List layout can over-allocate spacing depending on widget heights and fontstring metrics on 3.3.5)
     container:SetLayout("Flow")
 
+    local ROW_H = 26
+    local LABEL_H = 14
+    local GAP_H = 10
+
     ------------------------------------------------
     -- 1) Class row: dropdown (40%) + spacer + < >
     ------------------------------------------------
@@ -1640,13 +1664,13 @@ function Echoes:BuildBotTab(container)
 
     local padL = AceGUI:Create("Label")
     padL:SetText("")
-    padL:SetRelativeWidth(0.04)
+    padL:SetRelativeWidth(0.02)
     classGroup:AddChild(padL)
 
     -- Inline "Class" label
     local classLabel = AceGUI:Create("Label")
     classLabel:SetText("Class")
-    classLabel:SetRelativeWidth(0.12)
+    classLabel:SetRelativeWidth(0.14)
     classGroup:AddChild(classLabel)
     SkinLabel(classLabel)
 
@@ -1660,12 +1684,44 @@ function Echoes:BuildBotTab(container)
     classDrop:SetLabel("")
     classDrop:SetList(classValues)
     classDrop:SetValue(EchoesDB.classIndex or 1)
-    classDrop:SetRelativeWidth(0.40)
-    classDrop:SetCallback("OnValueChanged", function(widget, event, value)
-        EchoesDB.classIndex = value
-    end)
+    classDrop:SetRelativeWidth(0.46)
+    classDrop:SetHeight(ROW_H)
     classGroup:AddChild(classDrop)
     SkinDropdown(classDrop)
+
+    local function ApplyBotClassDropdownColor(idx)
+        if not classDrop or not classDrop.text or not classDrop.text.SetTextColor then return end
+        idx = tonumber(idx) or (EchoesDB.classIndex or 1)
+
+        local colors = rawget(_G, "RAID_CLASS_COLORS")
+        local classFileByIndex = {
+            [1]  = "PALADIN",
+            [2]  = "DEATHKNIGHT",
+            [3]  = "WARRIOR",
+            [4]  = "SHAMAN",
+            [5]  = "HUNTER",
+            [6]  = "DRUID",
+            [7]  = "ROGUE",
+            [8]  = "PRIEST",
+            [9]  = "WARLOCK",
+            [10] = "MAGE",
+        }
+        local cf = classFileByIndex[idx]
+        local c = cf and colors and colors[cf]
+        if c then
+            classDrop.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+        else
+            classDrop.text:SetTextColor(0.90, 0.85, 0.70, 1)
+        end
+    end
+
+    classDrop:SetCallback("OnValueChanged", function(widget, event, value)
+        EchoesDB.classIndex = value
+        ApplyBotClassDropdownColor(value)
+    end)
+
+    -- Ensure initial color matches selected class.
+    ApplyBotClassDropdownColor(EchoesDB.classIndex or 1)
 
 
     local function SetClassIndex(idx)
@@ -1678,16 +1734,18 @@ function Echoes:BuildBotTab(container)
         end
         EchoesDB.classIndex = idx
         classDrop:SetValue(idx)
+        ApplyBotClassDropdownColor(idx)
     end
 
     local classSpacer = AceGUI:Create("SimpleGroup")
-    classSpacer:SetRelativeWidth(0.1)
+    classSpacer:SetRelativeWidth(0.04)
     classSpacer:SetLayout("Flow")
     classGroup:AddChild(classSpacer)
 
     local prevBtn = AceGUI:Create("Button")
     prevBtn:SetText("<")
-    prevBtn:SetRelativeWidth(0.15)
+    prevBtn:SetRelativeWidth(0.16)
+    prevBtn:SetHeight(ROW_H)
     prevBtn:SetCallback("OnClick", function()
         SetClassIndex((EchoesDB.classIndex or 1) - 1)
     end)
@@ -1696,7 +1754,8 @@ function Echoes:BuildBotTab(container)
 
     local nextBtn = AceGUI:Create("Button")
     nextBtn:SetText(">")
-    nextBtn:SetRelativeWidth(0.15)
+    nextBtn:SetRelativeWidth(0.16)
+    nextBtn:SetHeight(ROW_H)
     nextBtn:SetCallback("OnClick", function()
         SetClassIndex((EchoesDB.classIndex or 1) + 1)
     end)
@@ -1706,10 +1765,10 @@ function Echoes:BuildBotTab(container)
     -- right padding (~15px)
     local padR = AceGUI:Create("Label")
     padR:SetText("")
-    padR:SetRelativeWidth(0.04)
+    padR:SetRelativeWidth(0.02)
     classGroup:AddChild(padR)
 
-    classGroup:SetHeight(32)
+    classGroup:SetHeight(ROW_H + 4)
 
     ------------------------------------------------
     -- 2) Add / Remove row (centered)
@@ -1720,13 +1779,14 @@ function Echoes:BuildBotTab(container)
     container:AddChild(addRemGroup)
 
     local spacerL = AceGUI:Create("SimpleGroup")
-    spacerL:SetRelativeWidth(0.15)
+    spacerL:SetRelativeWidth(0.05)
     spacerL:SetLayout("Flow")
     addRemGroup:AddChild(spacerL)
 
     local addBtn = AceGUI:Create("Button")
     addBtn:SetText("Add")
-    addBtn:SetRelativeWidth(0.35)
+    addBtn:SetRelativeWidth(0.45)
+    addBtn:SetHeight(ROW_H)
     addBtn:SetCallback("OnClick", function()
         local c = GetSelectedClass()
         SendChatMessage(".playerbots bot addclass " .. c.cmd, "GUILD")
@@ -1736,7 +1796,8 @@ function Echoes:BuildBotTab(container)
 
     local remBtn = AceGUI:Create("Button")
     remBtn:SetText("Remove All")
-    remBtn:SetRelativeWidth(0.35)
+    remBtn:SetRelativeWidth(0.45)
+    remBtn:SetHeight(ROW_H)
     remBtn:SetCallback("OnClick", function()
         SendCmdKey("REMOVE_ALL")
     end)
@@ -1744,11 +1805,11 @@ function Echoes:BuildBotTab(container)
     SkinButton(remBtn)
 
     local spacerR = AceGUI:Create("SimpleGroup")
-    spacerR:SetRelativeWidth(0.15)
+    spacerR:SetRelativeWidth(0.05)
     spacerR:SetLayout("Flow")
     addRemGroup:AddChild(spacerR)
 
-    addRemGroup:SetHeight(24)
+    addRemGroup:SetHeight(ROW_H + 2)
 
     ------------------------------------------------
     -- 3) Utilities rows: Summon/Release, LevelUp/Drink
@@ -1760,30 +1821,32 @@ function Echoes:BuildBotTab(container)
         container:AddChild(row)
 
         local rSpacerL = AceGUI:Create("SimpleGroup")
-        rSpacerL:SetRelativeWidth(0.15)
+        rSpacerL:SetRelativeWidth(0.05)
         rSpacerL:SetLayout("Flow")
         row:AddChild(rSpacerL)
 
         local b1 = AceGUI:Create("Button")
         b1:SetText(text1)
-        b1:SetRelativeWidth(0.35)
+        b1:SetRelativeWidth(0.45)
+        b1:SetHeight(ROW_H)
         b1:SetCallback("OnClick", function() SendCmdKey(key1) end)
         row:AddChild(b1)
         SkinButton(b1)
 
         local b2 = AceGUI:Create("Button")
         b2:SetText(text2)
-        b2:SetRelativeWidth(0.35)
+        b2:SetRelativeWidth(0.45)
+        b2:SetHeight(ROW_H)
         b2:SetCallback("OnClick", function() SendCmdKey(key2) end)
         row:AddChild(b2)
         SkinButton(b2)
 
         local rSpacerR = AceGUI:Create("SimpleGroup")
-        rSpacerR:SetRelativeWidth(0.15)
+        rSpacerR:SetRelativeWidth(0.05)
         rSpacerR:SetLayout("Flow")
         row:AddChild(rSpacerR)
 
-        row:SetHeight(22)
+        row:SetHeight(ROW_H + 2)
     end
 
     MakeUtilRow("Summon",  "SUMMON",   "Release",  "RELEASE")
@@ -1798,44 +1861,47 @@ function Echoes:BuildBotTab(container)
     container:AddChild(moveGroup)
 
     local mSpacerL = AceGUI:Create("SimpleGroup")
-    mSpacerL:SetRelativeWidth(0.125)
+    mSpacerL:SetRelativeWidth(0.05)
     mSpacerL:SetLayout("Flow")
     moveGroup:AddChild(mSpacerL)
 
     local followBtn = AceGUI:Create("Button")
     followBtn:SetText("Follow")
-    followBtn:SetRelativeWidth(0.25)
+    followBtn:SetRelativeWidth(0.30)
+    followBtn:SetHeight(ROW_H)
     followBtn:SetCallback("OnClick", function() SendCmdKey("FOLLOW") end)
     moveGroup:AddChild(followBtn)
     SkinButton(followBtn)
 
     local stayBtn = AceGUI:Create("Button")
     stayBtn:SetText("Stay")
-    stayBtn:SetRelativeWidth(0.25)
+    stayBtn:SetRelativeWidth(0.30)
+    stayBtn:SetHeight(ROW_H)
     stayBtn:SetCallback("OnClick", function() SendCmdKey("STAY") end)
     moveGroup:AddChild(stayBtn)
     SkinButton(stayBtn)
 
     local fleeBtn = AceGUI:Create("Button")
     fleeBtn:SetText("Flee")
-    fleeBtn:SetRelativeWidth(0.25)
+    fleeBtn:SetRelativeWidth(0.30)
+    fleeBtn:SetHeight(ROW_H)
     fleeBtn:SetCallback("OnClick", function() SendCmdKey("FLEE") end)
     moveGroup:AddChild(fleeBtn)
     SkinButton(fleeBtn)
 
     local mSpacerR = AceGUI:Create("SimpleGroup")
-    mSpacerR:SetRelativeWidth(0.125)
+    mSpacerR:SetRelativeWidth(0.05)
     mSpacerR:SetLayout("Flow")
     moveGroup:AddChild(mSpacerR)
 
-    moveGroup:SetHeight(32)
+    moveGroup:SetHeight(ROW_H + 4)
 
     -- Extra vertical spacing between global movement buttons and the role matrix
     -- (Empty SimpleGroups can collapse in AceGUI Flow layout; use a Label spacer instead.)
     local moveRoleGap = AceGUI:Create("Label")
     moveRoleGap:SetText(" ")
     moveRoleGap:SetFullWidth(true)
-    moveRoleGap:SetHeight(18)
+    moveRoleGap:SetHeight(GAP_H)
     container:AddChild(moveRoleGap)
 
     ------------------------------------------------
@@ -1857,7 +1923,7 @@ function Echoes:BuildBotTab(container)
         end
         container:AddChild(lab)
         SkinLabel(lab)
-        lab:SetHeight(12)
+        lab:SetHeight(LABEL_H)
 
         local rowGroup = AceGUI:Create("SimpleGroup")
         rowGroup:SetFullWidth(true)
@@ -1865,14 +1931,15 @@ function Echoes:BuildBotTab(container)
         container:AddChild(rowGroup)
 
         local rowSpacerL = AceGUI:Create("SimpleGroup")
-        rowSpacerL:SetRelativeWidth(0.03)
+        rowSpacerL:SetRelativeWidth(0.02)
         rowSpacerL:SetLayout("Flow")
         rowGroup:AddChild(rowSpacerL)
 
         local function AddRoleButton(text, key)
             local b = AceGUI:Create("Button")
             b:SetText(text)
-            b:SetRelativeWidth(0.235) -- 4 * 0.235 + 2*0.03 ≈ 1.0
+            b:SetRelativeWidth(0.24) -- 4 * 0.24 + 2*0.02 = 1.0
+            b:SetHeight(ROW_H)
             b:SetCallback("OnClick", function() SendCmdKey(key) end)
             rowGroup:AddChild(b)
             SkinButton(b)
@@ -1884,11 +1951,11 @@ function Echoes:BuildBotTab(container)
         AddRoleButton("Flee",   row.fl)
 
         local rowSpacerR = AceGUI:Create("SimpleGroup")
-        rowSpacerR:SetRelativeWidth(0.03)
+        rowSpacerR:SetRelativeWidth(0.02)
         rowSpacerR:SetLayout("Flow")
         rowGroup:AddChild(rowSpacerR)
 
-        rowGroup:SetHeight(22)
+        rowGroup:SetHeight(ROW_H + 2)
     end
 end
 
@@ -1899,6 +1966,9 @@ function Echoes:BuildGroupTab(container)
     container:SetLayout("List")
 
     local INPUT_HEIGHT = 24
+    -- Compact, consistent height for the group slot grid. Without explicit heights,
+    -- AceGUI containers default to a fairly tall value which looks like a huge empty panel.
+    local SLOT_GROUP_H = (5 * INPUT_HEIGHT) + 24
 
     local PRESET_COUNT = #GROUP_TEMPLATES
     -- Use a large numeric key so AceGUI's sorted dropdown puts this at the end.
@@ -1927,7 +1997,7 @@ function Echoes:BuildGroupTab(container)
     local headerPadTop = AceGUI:Create("SimpleGroup")
     headerPadTop:SetFullWidth(true)
     headerPadTop:SetLayout("Flow")
-    headerPadTop:SetHeight(8)
+    headerPadTop:SetHeight(6)
     container:AddChild(headerPadTop)
 
     local topGroup = AceGUI:Create("SimpleGroup")
@@ -1937,21 +2007,21 @@ function Echoes:BuildGroupTab(container)
     container:AddChild(topGroup)
 
     local headerPadL = AceGUI:Create("SimpleGroup")
-    headerPadL:SetRelativeWidth(0.01)
+    headerPadL:SetRelativeWidth(0.008)
     headerPadL:SetLayout("Flow")
     topGroup:AddChild(headerPadL)
 
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
     nameEdit:SetText("")
-    nameEdit:SetRelativeWidth(0.35)
+    nameEdit:SetRelativeWidth(0.33)
     nameEdit:SetHeight(INPUT_HEIGHT)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
     if nameEdit.DisableButton then nameEdit:DisableButton(true) end
 
     local topSpacer = AceGUI:Create("SimpleGroup")
-    topSpacer:SetRelativeWidth(0.02)
+    topSpacer:SetRelativeWidth(0.015)
     topSpacer:SetLayout("Flow")
     topGroup:AddChild(topSpacer)
 
@@ -1987,7 +2057,7 @@ function Echoes:BuildGroupTab(container)
     templateDrop:SetLabel("")
     templateDrop:SetList(templateValues)
     templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
-    templateDrop:SetRelativeWidth(0.35)
+    templateDrop:SetRelativeWidth(0.33)
     templateDrop:SetHeight(INPUT_HEIGHT)
     self.UI.groupTemplateNameEdit = nameEdit
     self.UI.groupTemplateDrop = templateDrop
@@ -2274,13 +2344,13 @@ function Echoes:BuildGroupTab(container)
     RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
 
     local topSpacer2 = AceGUI:Create("SimpleGroup")
-    topSpacer2:SetRelativeWidth(0.02)
+    topSpacer2:SetRelativeWidth(0.015)
     topSpacer2:SetLayout("Flow")
     topGroup:AddChild(topSpacer2)
 
     saveBtn = AceGUI:Create("Button")
     saveBtn:SetText("Save")
-    saveBtn:SetRelativeWidth(0.12)
+    saveBtn:SetRelativeWidth(0.145)
     saveBtn:SetHeight(INPUT_HEIGHT)
     saveBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
@@ -2300,7 +2370,7 @@ function Echoes:BuildGroupTab(container)
 
     deleteBtn = AceGUI:Create("Button")
     deleteBtn:SetText("Delete")
-    deleteBtn:SetRelativeWidth(0.12)
+    deleteBtn:SetRelativeWidth(0.145)
     deleteBtn:SetHeight(INPUT_HEIGHT)
     deleteBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
@@ -2336,22 +2406,49 @@ function Echoes:BuildGroupTab(container)
     RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
 
     local headerPadR = AceGUI:Create("SimpleGroup")
-    headerPadR:SetRelativeWidth(0.01)
+    headerPadR:SetRelativeWidth(0.008)
     headerPadR:SetLayout("Flow")
     topGroup:AddChild(headerPadR)
 
     local headerPadBottom = AceGUI:Create("SimpleGroup")
     headerPadBottom:SetFullWidth(true)
     headerPadBottom:SetLayout("Flow")
-    headerPadBottom:SetHeight(8)
+    headerPadBottom:SetHeight(6)
     container:AddChild(headerPadBottom)
 
     local gridGroup = AceGUI:Create("InlineGroup")
     gridGroup:SetTitle("Group Slots")
     gridGroup:SetFullWidth(true)
-    gridGroup:SetLayout("Flow")
-    SkinInlineGroup(gridGroup, { border = true, alpha = 0.30 })
+    -- Use List here (not Flow). AceGUI's Flow layout applies vertical offset hacks
+    -- that can create a large empty gap before the first row when using full-width children.
+    gridGroup:SetLayout("List")
+    -- No border here so any leftover padding doesn't read as a giant boxed region.
+    SkinInlineGroup(gridGroup, { border = false, alpha = 0.12 })
+    gridGroup:SetHeight((SLOT_GROUP_H * 2) + 26)
     container:AddChild(gridGroup)
+
+    -- Inner padding + fixed row structure for cleaner alignment.
+    -- Use a SimpleGroup spacer (Label auto-resizes based on font height).
+    local gridPadTop = AceGUI:Create("SimpleGroup")
+    gridPadTop:SetFullWidth(true)
+    gridPadTop:SetLayout("Flow")
+    -- Fixed small top padding so the grid starts near the title (and doesn't inherit
+    -- any pooled height). Keep auto height disabled so the spacer doesn't collapse.
+    if gridPadTop.SetAutoAdjustHeight then
+        gridPadTop:SetAutoAdjustHeight(false)
+    end
+    gridPadTop:SetHeight(-30)
+    gridGroup:AddChild(gridPadTop)
+
+    local gridRow1 = AceGUI:Create("SimpleGroup")
+    gridRow1:SetFullWidth(true)
+    gridRow1:SetLayout("Flow")
+    gridGroup:AddChild(gridRow1)
+
+    local gridRow2 = AceGUI:Create("SimpleGroup")
+    gridRow2:SetFullWidth(true)
+    gridRow2:SetLayout("Flow")
+    gridGroup:AddChild(gridRow2)
 
     -- Layout groups in a 3x2 grid (3 on first row, 2 on second row)
     local COLUMN_CONFIG = {
@@ -2433,9 +2530,14 @@ function Echoes:BuildGroupTab(container)
         col:SetLayout("List")
         -- 3 columns per row; Flow will wrap the remaining groups to row 2.
         -- Slightly wider columns so the right-side button text doesn't clip.
-        col:SetRelativeWidth(0.325)
+        col:SetRelativeWidth(0.333)
+        col:SetHeight(SLOT_GROUP_H)
         SkinInlineGroup(col, { border = false, alpha = 0.28 })
-        gridGroup:AddChild(col)
+        if colIndex <= 3 then
+            gridRow1:AddChild(col)
+        else
+            gridRow2:AddChild(col)
+        end
 
         self.UI.groupSlots[colIndex] = self.UI.groupSlots[colIndex] or {}
 
@@ -2443,6 +2545,7 @@ function Echoes:BuildGroupTab(container)
             local rowGroup = AceGUI:Create("SimpleGroup")
             rowGroup:SetFullWidth(true)
             rowGroup:SetLayout("Flow")
+            rowGroup:SetHeight(INPUT_HEIGHT)
             col:AddChild(rowGroup)
 
             local isPlayerSlot = false
@@ -2669,9 +2772,10 @@ function Echoes:BuildGroupTab(container)
         if actionCol.titletext.Hide then actionCol.titletext:Hide() end
     end
     actionCol:SetLayout("List")
-    actionCol:SetRelativeWidth(0.325)
+    actionCol:SetRelativeWidth(0.333)
+    actionCol:SetHeight(SLOT_GROUP_H)
     SkinInlineGroup(actionCol, { border = false, alpha = 0.28 })
-    gridGroup:AddChild(actionCol)
+    gridRow2:AddChild(actionCol)
 
     local inviteBtn = AceGUI:Create("Button")
     inviteBtn:SetText("Invite")
