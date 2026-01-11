@@ -60,7 +60,8 @@ Echoes has three tabs:
 Echoes sends predefined command strings using `SendChatMessage(...)`.
 
 - Default behavior sends to **PARTY**.
-- There are SavedVariables (`EchoesDB.sendAsChat` / `EchoesDB.chatChannel`) intended to support sending to a chosen chat channel, but the current UI does not expose these toggles.
+- You can toggle **Send commands to a chat channel** and choose a **Channel** on the **Echoes** tab.
+- The **Group Creation → Set Talents** button uses a configurable **Talent Command** template (also on the **Echoes** tab).
 
 ## SavedVariables
 

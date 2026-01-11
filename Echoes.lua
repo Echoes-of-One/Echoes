@@ -25,6 +25,14 @@ local function EnsureDefaults()
     EchoesDB.lastPanel          = EchoesDB.lastPanel          or "BOT"
     EchoesDB.minimapAngle       = EchoesDB.minimapAngle       or 220
     EchoesDB.uiScale            = EchoesDB.uiScale            or 1.0
+
+    -- Group Creation templates
+    EchoesDB.groupTemplates     = EchoesDB.groupTemplates     or {}
+    EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
+
+    -- Optional server-specific command template for setting talents/specs.
+    -- Tokens: {name} {class} {spec} {group} {slot}
+    EchoesDB.talentCommandTemplate = EchoesDB.talentCommandTemplate or ""
 end
 
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
@@ -302,6 +310,361 @@ local function SkinButton(widget)
     end
 end
 
+-- Forward declaration: ShowNamePrompt uses SkinEditBox, which is defined later.
+local SkinEditBox
+
+local function SkinPopupFrame(widget)
+    if not widget or not widget.frame then return end
+    local f = widget.frame
+
+    -- Hide any AceGUI resize grips and bottom-bar widgets for this popup.
+    -- We provide our own Save/Cancel buttons, and we never want a resizer.
+    if widget.sizer_se then widget.sizer_se:Hide(); widget.sizer_se:EnableMouse(false) end
+    if widget.sizer_s  then widget.sizer_s:Hide();  widget.sizer_s:EnableMouse(false)  end
+    if widget.sizer_e  then widget.sizer_e:Hide();  widget.sizer_e:EnableMouse(false)  end
+    if f.sizer_se then f.sizer_se:Hide(); if f.sizer_se.EnableMouse then f.sizer_se:EnableMouse(false) end end
+    if f.sizer_s  then f.sizer_s:Hide();  if f.sizer_s.EnableMouse  then f.sizer_s:EnableMouse(false)  end end
+    if f.sizer_e  then f.sizer_e:Hide();  if f.sizer_e.EnableMouse  then f.sizer_e:EnableMouse(false)  end end
+
+    if widget.closebutton then
+        widget.closebutton:Hide()
+        widget.closebutton:EnableMouse(false)
+    end
+    if widget.statusbg then
+        widget.statusbg:Hide()
+        if widget.statusbg.SetBackdrop then widget.statusbg:SetBackdrop(nil) end
+        if widget.statusbg.SetAlpha then widget.statusbg:SetAlpha(0) end
+        if widget.statusbg.EnableMouse then widget.statusbg:EnableMouse(false) end
+        if widget.statusbg.SetWidth then widget.statusbg:SetWidth(1) end
+        if widget.statusbg.SetHeight then widget.statusbg:SetHeight(1) end
+        if widget.statusbg.ClearAllPoints and widget.statusbg.SetPoint then
+            widget.statusbg:ClearAllPoints()
+            widget.statusbg:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 0, 0)
+        end
+    end
+    if widget.statustext then
+        widget.statustext:Hide()
+        if widget.statustext.SetText then widget.statustext:SetText("") end
+    end
+
+    -- Some Ace3 builds attach the status background/text directly to the frame.
+    if f.statusbg then
+        f.statusbg:Hide()
+        if f.statusbg.SetBackdrop then f.statusbg:SetBackdrop(nil) end
+        if f.statusbg.SetAlpha then f.statusbg:SetAlpha(0) end
+        if f.statusbg.SetWidth then f.statusbg:SetWidth(1) end
+        if f.statusbg.SetHeight then f.statusbg:SetHeight(1) end
+        if f.statusbg.ClearAllPoints and f.statusbg.SetPoint then
+            f.statusbg:ClearAllPoints()
+            f.statusbg:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 0, 0)
+        end
+    end
+    if f.statustext then
+        f.statustext:Hide()
+        if f.statustext.SetText then f.statustext:SetText("") end
+    end
+
+    -- Strip default AceGUI/Blizzard textures where possible
+    if f.GetRegions then
+        local regs = { f:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") then
+                r:SetTexture(nil)
+            end
+        end
+    end
+
+    SkinBackdrop(f, 0.95)
+    if f.SetBackdropBorderColor then
+        f:SetBackdropBorderColor(0, 0, 0, 0.85)
+    end
+end
+
+function Echoes:ShowNamePrompt(opts)
+    opts = opts or {}
+    local title = opts.title or "Custom Character"
+    local initialText = tostring(opts.initialText or "")
+    local onAccept = opts.onAccept
+    local onCancel = opts.onCancel
+
+    -- Close any existing prompt
+    if self.UI and self.UI.namePrompt and self.UI.namePrompt.Release then
+        self.UI.namePrompt:Release()
+        self.UI.namePrompt = nil
+    end
+
+    local INPUT_HEIGHT = 24
+    local w = AceGUI:Create("Frame")
+    w:SetTitle(title)
+    w:SetLayout("List")
+    w:SetWidth(280)
+    w:SetHeight(160)
+
+    if w.frame and w.frame.SetFrameStrata then
+        w.frame:SetFrameStrata("DIALOG")
+    end
+
+    -- Popup should not be movable/resizable in 3.3.5
+    if w.frame then
+        -- AceGUI's title bar calls :StartMoving() unconditionally; if the frame
+        -- is not movable, WoW throws "Frame is not movable". Keep movable enabled
+        -- and instead disable the title mover child frame (see below).
+        if w.frame.SetMovable then w.frame:SetMovable(true) end
+        -- AceGUI's sizer scripts call :StartSizing() unconditionally; if the frame
+        -- is not resizable, WoW throws "Frame is not resizable". Keep resizable
+        -- enabled but lock min/max to the same size.
+        if w.frame.SetResizable then w.frame:SetResizable(true) end
+        if w.frame.SetMinResize and w.frame.SetMaxResize and w.frame.GetWidth and w.frame.GetHeight then
+            local fw = w.frame:GetWidth() or 260
+            local fh = w.frame:GetHeight() or 140
+            w.frame:SetMinResize(fw, fh)
+            w.frame:SetMaxResize(fw, fh)
+        end
+    end
+
+    SkinPopupFrame(w)
+
+    -- Remove any reserved bottom status-bar space and avoid overlap with our buttons.
+    if w.frame and w.content and w.content.ClearAllPoints and w.content.SetPoint then
+        w.content:ClearAllPoints()
+        w.content:SetPoint("TOPLEFT", w.frame, "TOPLEFT", 10, -36)
+        w.content:SetPoint("BOTTOMRIGHT", w.frame, "BOTTOMRIGHT", -10, 46)
+    end
+
+    local function DisableAceGUIChrome(frame)
+        if not frame or not frame.GetChildren then return end
+        local children = { frame:GetChildren() }
+        for _, child in ipairs(children) do
+            if child and child.IsObjectType then
+                if child:IsObjectType("Button") then
+                    local point, relTo = child.GetPoint and child:GetPoint(1)
+                    local w2 = child.GetWidth and child:GetWidth() or 0
+                    local h2 = child.GetHeight and child:GetHeight() or 0
+
+                    -- Hide the default bottom-right Close button and the bottom-left status bar.
+                    if (relTo == frame or relTo == nil) and point == "BOTTOMRIGHT" and w2 >= 90 and h2 <= 22 then
+                        child:Hide()
+                        child:EnableMouse(false)
+                    elseif (relTo == frame or relTo == nil) and point == "BOTTOMLEFT" and h2 == 24 then
+                        child:Hide()
+                        child:EnableMouse(false)
+                    end
+                elseif child:IsObjectType("Frame") then
+                    local md = child.GetScript and child:GetScript("OnMouseDown")
+                    local mu = child.GetScript and child:GetScript("OnMouseUp")
+                    local point, relTo = child.GetPoint and child:GetPoint(1)
+                    local cw = child.GetWidth and child:GetWidth() or 0
+                    local ch = child.GetHeight and child:GetHeight() or 0
+
+                    -- Hide status-bar background frames (common: 24px tall, bottom-anchored)
+                    if (relTo == frame or relTo == nil) and point and point:find("BOTTOM") and ch >= 18 and ch <= 30 and cw >= 80 then
+                        child:Hide()
+                        child:SetAlpha(0)
+                        if child.SetBackdrop then child:SetBackdrop(nil) end
+                        if child.EnableMouse then child:EnableMouse(false) end
+                    end
+
+                    -- Hide resize grips (sizers): small frames anchored on bottom/right.
+                    if md and mu and (relTo == frame or relTo == nil) and (point == "BOTTOMRIGHT" or point == "BOTTOM" or point == "RIGHT") and cw <= 30 and ch <= 30 then
+                        child:Hide()
+                        if child.EnableMouse then child:EnableMouse(false) end
+                        if child.SetScript then
+                            child:SetScript("OnMouseDown", nil)
+                            child:SetScript("OnMouseUp", nil)
+                        end
+                    end
+
+                    -- Disable the title mover: a mouse-enabled frame with mouse down/up scripts.
+                    if md and mu and (point == "TOP" or point == "TOPLEFT" or point == "TOPRIGHT" or point == nil) and ch >= 20 and ch <= 50 then
+                        if child.EnableMouse then child:EnableMouse(false) end
+                        if child.SetScript then
+                            child:SetScript("OnMouseDown", nil)
+                            child:SetScript("OnMouseUp", nil)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if w.frame then
+        DisableAceGUIChrome(w.frame)
+    end
+
+    local function ClosePrompt()
+        if self.UI and self.UI.namePrompt == w then
+            self.UI.namePrompt = nil
+        end
+        if w and w.Release then
+            w:Release()
+        end
+    end
+
+    local function DoAccept()
+        local text = initialText
+        -- AceGUI EditBox stores the real EditBox as widget.editbox
+        if w._EchoesNameEdit and w._EchoesNameEdit.editbox and w._EchoesNameEdit.editbox.GetText then
+            text = w._EchoesNameEdit.editbox:GetText() or ""
+        end
+
+        if type(onAccept) == "function" then
+            onAccept(text)
+        end
+        ClosePrompt()
+    end
+
+    local function DoCancel()
+        if type(onCancel) == "function" then
+            onCancel()
+        end
+        ClosePrompt()
+    end
+
+    w:SetCallback("OnClose", function()
+        DoCancel()
+    end)
+
+    -- Upper-center on screen
+    if w.frame and w.frame.ClearAllPoints and w.frame.SetPoint then
+        w.frame:ClearAllPoints()
+        w.frame:SetPoint("TOP", UIParent, "TOP", 0, -120)
+    end
+
+    local padTop = AceGUI:Create("SimpleGroup")
+    padTop:SetFullWidth(true)
+    padTop:SetLayout("Flow")
+    padTop:SetHeight(6)
+    w:AddChild(padTop)
+
+    local edit = AceGUI:Create("EditBox")
+    edit:SetLabel("")
+    edit:SetText(initialText)
+    edit:SetFullWidth(true)
+    edit:SetHeight(INPUT_HEIGHT)
+    w:AddChild(edit)
+    SkinEditBox(edit)
+    if edit.DisableButton then
+        edit:DisableButton(true)
+    end
+    -- AceGUI EditBox's internal OKAY button can still be visible depending on focus/text;
+    -- force-hide it when we want a clean popup.
+    if edit.button then
+        if edit.button.Hide then edit.button:Hide() end
+        if edit.button.EnableMouse then edit.button:EnableMouse(false) end
+        -- Some Ace3 builds will re-show this button on focus; prevent it.
+        if edit.button.Hide then
+            edit.button.Show = edit.button.Hide
+        end
+    end
+    if edit.editbox and edit.editbox.SetTextInsets then
+        edit.editbox:SetTextInsets(0, 0, 3, 3)
+    end
+    w._EchoesNameEdit = edit
+
+    edit:SetCallback("OnEnterPressed", function(widget, event, text)
+        DoAccept()
+    end)
+
+    -- Escape should cancel/close, and focus the editbox when shown.
+    if edit and edit.editbox then
+        if edit.editbox.SetFocus then
+            edit.editbox:SetFocus()
+        end
+        if edit.editbox.HighlightText then
+            edit.editbox:HighlightText()
+        end
+
+        -- Wire keys directly on the real EditBox for reliability across Ace3 builds.
+        if edit.editbox.SetScript then
+            edit.editbox:SetScript("OnEnterPressed", function()
+                DoAccept()
+            end)
+            edit.editbox:SetScript("OnEscapePressed", function()
+                DoCancel()
+            end)
+        end
+    end
+
+
+    -- Provide explicit Save/Cancel buttons (do not rely on AceGUI's bottom bar).
+    if w.frame then
+        local f = w.frame
+        local function EnsurePopupButton(key, label, anchorOffsetX, onClick)
+            local btn = f[key]
+            if not btn then
+                btn = CreateFrame("Button", nil, f)
+                btn:SetSize(90, 22)
+                SkinBackdrop(btn, 0.9)
+
+                local fs = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                fs:SetPoint("CENTER")
+                fs:SetTextColor(0.9, 0.8, 0.5, 1)
+                local font, size, flags = fs:GetFont()
+                fs:SetFont(font, math.max(10, (size or 12)), "OUTLINE")
+                btn._EchoesLabel = fs
+
+                btn:HookScript("OnEnter", function(self)
+                    self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
+                end)
+                btn:HookScript("OnLeave", function(self)
+                    self:SetBackdropColor(0.06, 0.06, 0.06, 0.9)
+                end)
+
+                f[key] = btn
+            end
+
+            if btn._EchoesLabel and btn._EchoesLabel.SetText then
+                btn._EchoesLabel:SetText(label)
+            end
+            if btn.ClearAllPoints then
+                btn:ClearAllPoints()
+                btn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", anchorOffsetX, 10)
+            end
+            if btn.SetFrameLevel and f.GetFrameLevel then
+                btn:SetFrameLevel((f:GetFrameLevel() or 0) + 10)
+            end
+            if btn.EnableMouse then btn:EnableMouse(true) end
+            if btn.SetScript then btn:SetScript("OnClick", onClick) end
+            if btn.Show then btn:Show() end
+        end
+
+        EnsurePopupButton("EchoesPopupCancel", "Close", -10, function() DoCancel() end)
+        EnsurePopupButton("EchoesPopupSave", "Save", -110, function() DoAccept() end)
+
+        -- Last-resort: hide any remaining bottom-left status-bar panels.
+        if f.GetChildren then
+            local kids = { f:GetChildren() }
+            for _, child in ipairs(kids) do
+                if child and child.IsObjectType and child.GetPoint and child.GetHeight then
+                    local point, relTo = child:GetPoint(1)
+                    local h = child:GetHeight() or 0
+
+                    local isOurButton = (child == f.EchoesPopupSave) or (child == f.EchoesPopupCancel)
+                    if not isOurButton and (relTo == f or relTo == nil) and point and point:find("BOTTOM") and h >= 18 and h <= 30 then
+                        if child.Hide then child:Hide() end
+                        if child.SetAlpha then child:SetAlpha(0) end
+                        if child.EnableMouse then child:EnableMouse(false) end
+                        if child.SetBackdrop then child:SetBackdrop(nil) end
+
+                        -- Clear any textures on the offending frame.
+                        if child.GetRegions then
+                            local regs = { child:GetRegions() }
+                            for _, r in ipairs(regs) do
+                                if r and r.IsObjectType and r:IsObjectType("Texture") and r.SetTexture then
+                                    r:SetTexture(nil)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    self.UI = self.UI or {}
+    self.UI.namePrompt = w
+end
+
 -- Tab buttons: same base style but always white text
 local function SkinTabButton(widget)
     SkinButton(widget)
@@ -493,7 +856,7 @@ end
 -- Those DropDownList* frames are global singletons shared with Blizzard UI and
 -- other addons. Echoes styling is kept fully self-contained.
 
-local function SkinEditBox(widget)
+SkinEditBox = function(widget)
     if not widget or not widget.editbox then return end
     -- Remove template textures so the edit box matches Echoes theme
     if widget.editbox.GetRegions then
@@ -541,6 +904,60 @@ local function Clamp(v, minv, maxv)
     if v < minv then return minv end
     if v > maxv then return maxv end
     return v
+end
+
+local function Echoes_GetPlayerSpecLabel(classFile)
+    if not classFile or type(GetTalentTabInfo) ~= "function" then return nil end
+
+    local talentGroup = 1
+    if type(GetActiveTalentGroup) == "function" then
+        talentGroup = GetActiveTalentGroup() or 1
+    end
+
+    local bestName
+    local bestPoints = -1
+    for tab = 1, 3 do
+        local name, _, pointsSpent = GetTalentTabInfo(tab, false, false, talentGroup)
+        pointsSpent = tonumber(pointsSpent) or 0
+        if name and pointsSpent > bestPoints then
+            bestPoints = pointsSpent
+            bestName = name
+        end
+    end
+    if not bestName then return nil end
+
+    local s = tostring(bestName)
+    local norm = s:lower():gsub("%s+", "")
+
+    -- Normalize names that don't match our labels exactly.
+    if classFile == "DRUID" and norm == "feralcombat" then
+        return "Feral"
+    end
+
+    -- Most classes: talent tab names already match our labels.
+    if classFile == "PALADIN" then
+        if s == "Holy" or s == "Protection" or s == "Retribution" then return s end
+    elseif classFile == "DEATHKNIGHT" then
+        if s == "Blood" or s == "Frost" or s == "Unholy" then return s end
+    elseif classFile == "WARRIOR" then
+        if s == "Arms" or s == "Fury" or s == "Protection" then return s end
+    elseif classFile == "SHAMAN" then
+        if s == "Elemental" or s == "Enhancement" or s == "Restoration" then return s end
+    elseif classFile == "HUNTER" then
+        if s == "Beast Mastery" or s == "Marksmanship" or s == "Survival" then return s end
+    elseif classFile == "ROGUE" then
+        if s == "Assassination" or s == "Combat" or s == "Subtlety" then return s end
+    elseif classFile == "PRIEST" then
+        if s == "Discipline" or s == "Holy" or s == "Shadow" then return s end
+    elseif classFile == "WARLOCK" then
+        if s == "Affliction" or s == "Demonology" or s == "Destruction" then return s end
+    elseif classFile == "MAGE" then
+        if s == "Arcane" or s == "Fire" or s == "Frost" then return s end
+    elseif classFile == "DRUID" then
+        if s == "Balance" or s == "Feral" or s == "Restoration" then return s end
+    end
+
+    return nil
 end
 
 local CMD = {
@@ -594,6 +1011,51 @@ local function SendCmdKey(key)
     end
 end
 
+-- Small action queue to avoid spamming chat / invite too fast.
+-- actions: { { kind = "chat", msg = "...", channel = "PARTY", target = nil }, { kind = "invite", name = "..." }, ... }
+function Echoes:RunActionQueue(actions, interval)
+    if not actions or #actions == 0 then return end
+    interval = tonumber(interval) or 0.25
+    if interval < 0.05 then interval = 0.05 end
+
+    self._EchoesActionQueue = actions
+    self._EchoesActionInterval = interval
+    self._EchoesActionElapsed = 0
+
+    if not self._EchoesActionFrame then
+        local f = CreateFrame("Frame", nil, UIParent)
+        f:Hide()
+        f:SetScript("OnUpdate", function(_, elapsed)
+            if not Echoes._EchoesActionQueue or #Echoes._EchoesActionQueue == 0 then
+                f:Hide()
+                return
+            end
+
+            Echoes._EchoesActionElapsed = (Echoes._EchoesActionElapsed or 0) + (elapsed or 0)
+            if Echoes._EchoesActionElapsed < (Echoes._EchoesActionInterval or 0.25) then
+                return
+            end
+            Echoes._EchoesActionElapsed = 0
+
+            local a = table.remove(Echoes._EchoesActionQueue, 1)
+            if not a then return end
+
+            if a.kind == "invite" then
+                if type(InviteUnit) == "function" and a.name and a.name ~= "" then
+                    InviteUnit(a.name)
+                end
+            elseif a.kind == "chat" then
+                if type(SendChatMessage) == "function" and a.msg and a.msg ~= "" then
+                    SendChatMessage(a.msg, a.channel or "PARTY", nil, a.target)
+                end
+            end
+        end)
+        self._EchoesActionFrame = f
+    end
+
+    self._EchoesActionFrame:Show()
+end
+
 local CLASSES = {
     { label = "Paladin",      cmd = "paladin" },
     { label = "Death Knight", cmd = "dk"      },
@@ -614,9 +1076,8 @@ local function GetSelectedClass()
 end
 
 local GROUP_TEMPLATES = {
-    "naxx 10 man",
-    "Custom 1",
-    "Custom 2",
+    "10 Man",
+    "25 Man",
 }
 
 local GROUP_SLOT_OPTIONS = {
@@ -631,6 +1092,7 @@ local GROUP_SLOT_OPTIONS = {
     "Priest",
     "Warlock",
     "Mage",
+    "Altbot",
 }
 
 local DEFAULT_CYCLE_VALUES = {
@@ -1188,6 +1650,9 @@ function Echoes:BuildGroupTab(container)
 
     local INPUT_HEIGHT = 24
 
+    -- Clamp template index to our current preset count (now 2).
+    EchoesDB.groupTemplateIndex = Clamp(tonumber(EchoesDB.groupTemplateIndex) or 1, 1, #GROUP_TEMPLATES)
+
     local headerPadTop = AceGUI:Create("SimpleGroup")
     headerPadTop:SetFullWidth(true)
     headerPadTop:SetLayout("Flow")
@@ -1207,25 +1672,25 @@ function Echoes:BuildGroupTab(container)
 
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
-    nameEdit:SetText("Text Box")
+    nameEdit:SetText("")
     nameEdit:SetRelativeWidth(0.35)
     nameEdit:SetHeight(INPUT_HEIGHT)
-    nameEdit:SetCallback("OnEnterPressed", function(widget, event, text)
-        if text == "" then
-            widget:SetText("Text Box")
-        end
-    end)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
+    if nameEdit.DisableButton then nameEdit:DisableButton(true) end
 
     local topSpacer = AceGUI:Create("SimpleGroup")
     topSpacer:SetRelativeWidth(0.02)
     topSpacer:SetLayout("Flow")
     topGroup:AddChild(topSpacer)
 
+    local function GetTemplateDisplayName(i)
+        return GROUP_TEMPLATES[i] or ("Template " .. tostring(i))
+    end
+
     local templateValues = {}
-    for i, v in ipairs(GROUP_TEMPLATES) do
-        templateValues[i] = v
+    for i = 1, #GROUP_TEMPLATES do
+        templateValues[i] = GetTemplateDisplayName(i)
     end
 
     local templateDrop = AceGUI:Create("Dropdown")
@@ -1234,11 +1699,106 @@ function Echoes:BuildGroupTab(container)
     templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
     templateDrop:SetRelativeWidth(0.35)
     templateDrop:SetHeight(INPUT_HEIGHT)
+    self.UI.groupTemplateNameEdit = nameEdit
+    self.UI.groupTemplateDrop = templateDrop
+
+    local function RefreshTemplateHeader(selectedIndex)
+        local idx = tonumber(selectedIndex) or (EchoesDB.groupTemplateIndex or 1)
+        EchoesDB.groupTemplateIndex = idx
+
+        local displayName = GetTemplateDisplayName(idx)
+        if nameEdit and nameEdit.SetText then
+            nameEdit:SetText(displayName or "")
+        end
+
+        -- Presets are fixed: do not allow renaming.
+        local allowRename = false
+        if nameEdit and nameEdit.SetDisabled then
+            nameEdit:SetDisabled(not allowRename)
+        end
+        if nameEdit and nameEdit.editbox and nameEdit.editbox.SetTextColor then
+            if allowRename then
+                nameEdit.editbox:SetTextColor(0.90, 0.85, 0.70, 1)
+            else
+                nameEdit.editbox:SetTextColor(0.55, 0.55, 0.55, 1)
+            end
+        end
+    end
+
+    -- Forward declarations (used by template helpers below, populated later).
+    local slotValues = {}
+    local ALTBOT_INDEX
+
+    local function ApplyTemplateToFreeSlots(templateIndex)
+        local idx = tonumber(templateIndex) or 1
+        local tpl = EchoesDB.groupTemplates and EchoesDB.groupTemplates[idx]
+        local slots = tpl and tpl.slots
+        if not slots or not self.UI or not self.UI.groupSlots then return end
+
+        for g = 1, 5 do
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot and not slot._EchoesMember and slot.classDrop and slot.classDrop.SetValue then
+                    local entry = slots[g] and slots[g][p]
+                    if entry and type(entry) == "table" then
+                        local classText = tostring(entry.class or "None")
+                        local desiredIndex = 1
+                        for i, v in ipairs(slotValues) do
+                            if v == classText then
+                                desiredIndex = i
+                                break
+                            end
+                        end
+
+                        slot.classDrop._EchoesSuppress = true
+                        slot.classDrop:SetList(slotValues)
+                        slot.classDrop:SetValue(desiredIndex)
+                        slot.classDrop._EchoesSelectedValue = desiredIndex
+                        if desiredIndex == ALTBOT_INDEX then
+                            slot.classDrop._EchoesAltbotName = (entry.altName and tostring(entry.altName)) or nil
+                        else
+                            slot.classDrop._EchoesAltbotName = nil
+                        end
+                        slot.classDrop._EchoesSuppress = nil
+
+                        if slot.cycleBtn then
+                            local vals = GetCycleValuesForRightText(classText)
+                            slot.cycleBtn.values = { unpack(vals) }
+                            local want = entry.specLabel and tostring(entry.specLabel) or nil
+                            local chosen = 1
+                            if want and want ~= "" then
+                                for i, it in ipairs(slot.cycleBtn.values) do
+                                    if type(it) == "table" and it.label == want then
+                                        chosen = i
+                                        break
+                                    end
+                                end
+                            end
+                            slot.cycleBtn.index = chosen
+                            if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
+                        end
+
+                        if self.UI._GroupSlotApplyColor then
+                            self.UI._GroupSlotApplyColor(slot.classDrop, desiredIndex)
+                        end
+                        if slot.classDrop._EchoesUpdateNameButtonVisibility then
+                            slot.classDrop._EchoesUpdateNameButtonVisibility(desiredIndex)
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
         EchoesDB.groupTemplateIndex = value
+        RefreshTemplateHeader(value)
+        ApplyTemplateToFreeSlots(value)
     end)
     topGroup:AddChild(templateDrop)
     SkinDropdown(templateDrop)
+
+    RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
 
     local topSpacer2 = AceGUI:Create("SimpleGroup")
     topSpacer2:SetRelativeWidth(0.02)
@@ -1250,7 +1810,52 @@ function Echoes:BuildGroupTab(container)
     saveBtn:SetRelativeWidth(0.12)
     saveBtn:SetHeight(INPUT_HEIGHT)
     saveBtn:SetCallback("OnClick", function()
-        Echoes_Print("Group setup saved (stub).")
+        local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
+        EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
+
+        local newName = nil
+        -- Presets are fixed: ignore any name edits.
+
+        local tpl = { name = newName or GetTemplateDisplayName(idx), slots = {} }
+        for g = 1, 5 do
+            tpl.slots[g] = {}
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot and not slot._EchoesMember and slot.classDrop then
+                    local dd = slot.classDrop
+                    local value = dd._EchoesSelectedValue or dd.value or 1
+                    local classText = slotValues[value] or "None"
+
+                    local altName = dd._EchoesAltbotName
+                    if altName then
+                        altName = tostring(altName or "")
+                        altName = altName:gsub("^%s+", ""):gsub("%s+$", "")
+                        if altName == "" then altName = nil end
+                    end
+
+                    local specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil
+                    if specLabel == "None" then specLabel = nil end
+
+                    tpl.slots[g][p] = { class = classText, altName = altName, specLabel = specLabel }
+                else
+                    tpl.slots[g][p] = nil
+                end
+            end
+        end
+
+        EchoesDB.groupTemplates[idx] = tpl
+
+        -- Refresh dropdown display names (custom rename)
+        local vals = {}
+        for i = 1, #GROUP_TEMPLATES do
+            vals[i] = GetTemplateDisplayName(i)
+        end
+        if templateDrop and templateDrop.SetList then
+            templateDrop:SetList(vals)
+        end
+        RefreshTemplateHeader(idx)
+
+        Echoes_Print("Group setup saved.")
     end)
     topGroup:AddChild(saveBtn)
     SkinButton(saveBtn)
@@ -1260,7 +1865,20 @@ function Echoes:BuildGroupTab(container)
     deleteBtn:SetRelativeWidth(0.12)
     deleteBtn:SetHeight(INPUT_HEIGHT)
     deleteBtn:SetCallback("OnClick", function()
-        Echoes_Print("Group setup deleted (stub).")
+        local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
+        if EchoesDB.groupTemplates then
+            EchoesDB.groupTemplates[idx] = nil
+        end
+
+        local vals = {}
+        for i = 1, #GROUP_TEMPLATES do
+            vals[i] = GetTemplateDisplayName(i)
+        end
+        if templateDrop and templateDrop.SetList then
+            templateDrop:SetList(vals)
+        end
+        RefreshTemplateHeader(idx)
+        Echoes_Print("Group setup deleted.")
     end)
     topGroup:AddChild(deleteBtn)
     SkinButton(deleteBtn)
@@ -1288,10 +1906,20 @@ function Echoes:BuildGroupTab(container)
         { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 }, { rows = 5 },
     }
 
-    local slotValues = {}
+    slotValues = {}
     for i, v in ipairs(GROUP_SLOT_OPTIONS) do
         slotValues[i] = v
     end
+
+    ALTBOT_INDEX = nil
+    for i, v in ipairs(slotValues) do
+        if v == "Altbot" then
+            ALTBOT_INDEX = i
+            break
+        end
+    end
+
+    self.UI._AltbotIndex = ALTBOT_INDEX
 
     local DISPLAY_TO_CLASSFILE = {
         ["Paladin"] = "PALADIN",
@@ -1316,6 +1944,14 @@ function Echoes:BuildGroupTab(container)
         local display = slotValues[value]
         if display == "None" or not display then
             dropdownWidget.text:SetTextColor(0.60, 0.60, 0.60, 1)
+            return
+        end
+
+        if display == "Altbot" then
+            dropdownWidget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+            if dropdownWidget._EchoesAltbotName and dropdownWidget._EchoesAltbotName ~= "" and dropdownWidget.text.SetText then
+                dropdownWidget.text:SetText(dropdownWidget._EchoesAltbotName)
+            end
             return
         end
 
@@ -1434,6 +2070,7 @@ function Echoes:BuildGroupTab(container)
 
             cycleBtn:SetCallback("OnClick", function(widget, event, button)
                 local btn = widget
+                if btn._EchoesLocked then return end
                 if not btn.values or #btn.values == 0 then return end
                 if button == "RightButton" then
                     btn.index = btn.index - 1
@@ -1449,10 +2086,30 @@ function Echoes:BuildGroupTab(container)
             rowGroup:AddChild(cycleBtn)
             SkinButton(cycleBtn)
 
+            local nameBtn
             local dd = AceGUI:Create("Dropdown")
             dd:SetList(slotValues)
             dd:SetValue(1)
             dd:SetRelativeWidth(0.54)
+
+            local function UpdateNameButtonVisibility(selectedValue)
+                local value = selectedValue or dd._EchoesSelectedValue or dd.value
+                local showName = (value == ALTBOT_INDEX) or (dd._EchoesAltbotName and dd._EchoesAltbotName ~= "")
+                if nameBtn and nameBtn.frame then
+                    if showName then
+                        if nameBtn.frame.SetAlpha then nameBtn.frame:SetAlpha(1) end
+                        nameBtn.frame:Show()
+                        nameBtn.frame:EnableMouse(true)
+                    else
+                        if nameBtn.frame.SetAlpha then nameBtn.frame:SetAlpha(0) end
+                        nameBtn.frame:Hide()
+                        nameBtn.frame:EnableMouse(false)
+                    end
+                end
+            end
+
+            -- Expose for template apply.
+            dd._EchoesUpdateNameButtonVisibility = UpdateNameButtonVisibility
 
             -- Mark these dropdowns so our dropdown popup theming can color class names
             -- and the selected value can be class-colored/disabled-grey.
@@ -1463,6 +2120,12 @@ function Echoes:BuildGroupTab(container)
 
             dd:SetCallback("OnValueChanged", function(widget, event, value)
                 if widget._EchoesSuppress then return end
+                widget._EchoesSelectedValue = value
+
+                if value ~= ALTBOT_INDEX then
+                    widget._EchoesAltbotName = nil
+                end
+
                 local text = slotValues[value]
                 local vals = GetCycleValuesForRightText(text)
                 if cycleBtn then
@@ -1472,6 +2135,8 @@ function Echoes:BuildGroupTab(container)
                 end
 
                 ApplyGroupSlotSelectedTextColor(widget, value)
+
+                UpdateNameButtonVisibility(value)
             end)
 
             rowGroup:AddChild(dd)
@@ -1479,15 +2144,57 @@ function Echoes:BuildGroupTab(container)
 
             ApplyGroupSlotSelectedTextColor(dd, 1)
 
-            local nameBtn = AceGUI:Create("Button")
+            nameBtn = AceGUI:Create("Button")
             nameBtn:SetText("Name")
             nameBtn:SetRelativeWidth(0.32)
             nameBtn:SetHeight(INPUT_HEIGHT)
-            nameBtn:SetCallback("OnClick", function()
-                Echoes_Print("Name clicked (stub).")
-            end)
+            local function OnNameButtonClick()
+                if not ALTBOT_INDEX then return end
+                local cur = dd and (dd._EchoesSelectedValue or dd.value)
+                if cur ~= ALTBOT_INDEX then
+                    return
+                end
+
+                local initialText = (dd._EchoesAltbotName and tostring(dd._EchoesAltbotName)) or ""
+                local ok, err = pcall(function()
+                    Echoes:ShowNamePrompt({
+                        title = "Custom Character",
+                        initialText = initialText,
+                        onAccept = function(text)
+                            text = tostring(text or "")
+                            text = text:gsub("^%s+", ""):gsub("%s+$", "")
+                            if text == "" then
+                                dd._EchoesAltbotName = nil
+                            else
+                                dd._EchoesAltbotName = text
+                            end
+
+                            dd._EchoesSuppress = true
+                            dd:SetValue(ALTBOT_INDEX)
+                            dd._EchoesSuppress = nil
+                            ApplyGroupSlotSelectedTextColor(dd, ALTBOT_INDEX)
+                        end,
+                    })
+                end)
+
+                if not ok then
+                    Echoes_Print("Name popup error: " .. tostring(err))
+                end
+            end
+
+            nameBtn._EchoesDefaultOnClick = OnNameButtonClick
+            nameBtn:SetCallback("OnClick", OnNameButtonClick)
             rowGroup:AddChild(nameBtn)
             SkinButton(nameBtn)
+
+            -- Hide by default until Altbot is selected.
+            if nameBtn.frame then
+                nameBtn.frame:Hide()
+                nameBtn.frame:EnableMouse(false)
+            end
+
+            -- Ensure correct visibility if state was set before Name existed.
+            UpdateNameButtonVisibility(dd._EchoesSelectedValue or dd.value)
 
             if nameBtn.text and nameBtn.text.GetFont and nameBtn.text.SetFont then
                 local font, _, flags = nameBtn.text:GetFont()
@@ -1518,7 +2225,52 @@ function Echoes:BuildGroupTab(container)
     inviteBtn:SetText("Invite")
     inviteBtn:SetFullWidth(true)
     inviteBtn:SetCallback("OnClick", function()
-        Echoes_Print("Invite clicked (stub).")
+        if not self.UI or not self.UI.groupSlots then return end
+
+        local displayToCmd = {
+            ["Paladin"] = "paladin",
+            ["Death Knight"] = "dk",
+            ["Warrior"] = "warrior",
+            ["Shaman"] = "shaman",
+            ["Hunter"] = "hunter",
+            ["Druid"] = "druid",
+            ["Rogue"] = "rogue",
+            ["Priest"] = "priest",
+            ["Warlock"] = "warlock",
+            ["Mage"] = "mage",
+        }
+
+        local actions = {}
+        for g = 1, 5 do
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot and not slot._EchoesMember and slot.classDrop then
+                    local dd = slot.classDrop
+                    local value = dd._EchoesSelectedValue or dd.value or 1
+                    local classText = slotValues[value]
+
+                    if classText == "Altbot" then
+                        local name = dd._EchoesAltbotName
+                        if name and tostring(name):gsub("^%s+", ""):gsub("%s+$", "") ~= "" then
+                            actions[#actions + 1] = { kind = "invite", name = tostring(name) }
+                        end
+                    elseif classText and classText ~= "None" then
+                        local cmd = displayToCmd[classText]
+                        if cmd then
+                            actions[#actions + 1] = { kind = "chat", msg = ".playerbots bot addclass " .. cmd, channel = "GUILD" }
+                        end
+                    end
+                end
+            end
+        end
+
+        if #actions == 0 then
+            Echoes_Print("Nothing to invite.")
+            return
+        end
+
+        Echoes_Print("Inviting...")
+        self:RunActionQueue(actions, 0.35)
     end)
     actionCol:AddChild(inviteBtn)
     SkinButton(inviteBtn)
@@ -1527,13 +2279,59 @@ function Echoes:BuildGroupTab(container)
     talentsBtn:SetText("Set Talents")
     talentsBtn:SetFullWidth(true)
     talentsBtn:SetCallback("OnClick", function()
-        Echoes_Print("Set Talents clicked (stub).")
+        local tpl = tostring(EchoesDB.talentCommandTemplate or "")
+        tpl = tpl:gsub("^%s+", ""):gsub("%s+$", "")
+        if tpl == "" then
+            Echoes_Print("Set Talents: configure a Talent Command in the Echoes tab.")
+            return
+        end
+
+        if not self.UI or not self.UI.groupSlots then return end
+
+        local actions = {}
+        for g = 1, 5 do
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                local member = slot and slot._EchoesMember or nil
+                if member and not member.isPlayer and member.name and member.name ~= "" then
+                    local spec = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or ""
+                    local classText = nil
+                    if member.classFile then
+                        for disp, classFile in pairs(DISPLAY_TO_CLASSFILE) do
+                            if classFile == member.classFile then
+                                classText = disp
+                                break
+                            end
+                        end
+                    end
+
+                    local msg = tpl
+                    msg = msg:gsub("{name}", tostring(member.name))
+                    msg = msg:gsub("{class}", tostring(classText or ""))
+                    msg = msg:gsub("{spec}", tostring(spec or ""))
+                    msg = msg:gsub("{group}", tostring(g))
+                    msg = msg:gsub("{slot}", tostring(p))
+
+                    local ch = (EchoesDB.sendAsChat and EchoesDB.chatChannel) or "PARTY"
+                    actions[#actions + 1] = { kind = "chat", msg = msg, channel = ch }
+                end
+            end
+        end
+
+        if #actions == 0 then
+            Echoes_Print("Set Talents: no bot members found in the roster slots.")
+            return
+        end
+
+        Echoes_Print("Sending talent commands...")
+        self:RunActionQueue(actions, 0.35)
     end)
     actionCol:AddChild(talentsBtn)
     SkinButton(talentsBtn)
 
     -- Initialize from roster once the page is built.
     self:UpdateGroupCreationFromRoster(true)
+    ApplyTemplateToFreeSlots(EchoesDB.groupTemplateIndex or 1)
 end
 
 local function Echoes_GetGroupSlotIndexForClassFile(classFile)
@@ -1623,9 +2421,9 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             if slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
                 slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
             end
-            slot.nameBtn:SetCallback("OnClick", function()
-                Echoes_Print("Name clicked (stub).")
-            end)
+            if slot.nameBtn._EchoesDefaultOnClick then
+                slot.nameBtn:SetCallback("OnClick", slot.nameBtn._EchoesDefaultOnClick)
+            end
         end
     end
 
@@ -1634,7 +2432,11 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
         SetEnabledForWidget(slot.nameBtn, true)
-        SetNameButtonVisible(slot, true)
+        -- Only show Name for Altbot selection (or if an Altbot name exists)
+        local altIndex = self.UI and self.UI._AltbotIndex
+        local cur = slot.classDrop and (slot.classDrop._EchoesSelectedValue or slot.classDrop.value)
+        local showName = (altIndex and cur == altIndex) or (slot.classDrop and slot.classDrop._EchoesAltbotName and slot.classDrop._EchoesAltbotName ~= "")
+        SetNameButtonVisible(slot, showName and true or false)
 
         slot._EchoesMember = nil
         SetNameButtonMode(slot, "name")
@@ -1653,6 +2455,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         if slot.cycleBtn then
             slot.cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
             slot.cycleBtn.index = 1
+            slot.cycleBtn._EchoesLocked = false
             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
         end
     end
@@ -1702,14 +2505,30 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             end
 
             slot.cycleBtn.values = { unpack(vals) }
+
+            -- For the player slot, auto-select the icon matching the player's actual spec.
+            if member.isPlayer then
+                local wantLabel = Echoes_GetPlayerSpecLabel(member.classFile)
+                if wantLabel then
+                    for i, it in ipairs(slot.cycleBtn.values) do
+                        if type(it) == "table" and it.label == wantLabel then
+                            slot.cycleBtn.index = i
+                            break
+                        end
+                    end
+                end
+            end
+
             if not slot.cycleBtn.index or slot.cycleBtn.index < 1 or slot.cycleBtn.index > #slot.cycleBtn.values then
                 slot.cycleBtn.index = 1
             end
             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
         end
 
-        -- Spec box should always be changeable, even when the raid slot is filled.
-        SetEnabledForWidget(slot.cycleBtn, true)
+        -- Allow changing spec icons for bots, but not for the player's own slot.
+        if slot.cycleBtn then
+            slot.cycleBtn._EchoesLocked = member.isPlayer and true or false
+        end
     end
 
     -- Build members by subgroup in roster order.
@@ -1776,7 +2595,11 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                 if member then
                     FillSlot(slot, member)
                 else
-                    ResetSlot(slot)
+                    -- Preserve user-selected template values for empty slots, unless the slot
+                    -- was previously filled or we are forcing an initial build.
+                    if force or slot._EchoesMember then
+                        ResetSlot(slot)
+                    end
                 end
             end
         end
@@ -1818,6 +2641,71 @@ function Echoes:BuildEchoesTab(container)
         Echoes:ApplyScale()
     end)
     container:AddChild(scaleSlider)
+
+    local spacer = AceGUI:Create("Label")
+    spacer:SetText(" ")
+    spacer:SetFullWidth(true)
+    spacer:SetHeight(10)
+    container:AddChild(spacer)
+
+    local chatHeading = AceGUI:Create("Heading")
+    chatHeading:SetText("Command Sending")
+    chatHeading:SetFullWidth(true)
+    SkinHeading(chatHeading)
+    container:AddChild(chatHeading)
+
+    local sendAs = AceGUI:Create("CheckBox")
+    sendAs:SetLabel("Send commands to a chat channel")
+    sendAs:SetValue(EchoesDB.sendAsChat and true or false)
+    sendAs:SetFullWidth(true)
+    sendAs:SetCallback("OnValueChanged", function(widget, event, value)
+        EchoesDB.sendAsChat = value and true or false
+    end)
+    container:AddChild(sendAs)
+
+    local channelList = { "SAY", "PARTY", "RAID", "GUILD" }
+    local channelValues = {}
+    for i, v in ipairs(channelList) do channelValues[i] = v end
+
+    local channelDrop = AceGUI:Create("Dropdown")
+    channelDrop:SetLabel("Channel")
+    channelDrop:SetList(channelValues)
+    local cur = tostring(EchoesDB.chatChannel or "SAY")
+    local curIdx = 1
+    for i, v in ipairs(channelList) do
+        if v == cur then curIdx = i break end
+    end
+    channelDrop:SetValue(curIdx)
+    channelDrop:SetFullWidth(true)
+    channelDrop:SetCallback("OnValueChanged", function(widget, event, value)
+        local v = channelList[value] or "SAY"
+        EchoesDB.chatChannel = v
+    end)
+    container:AddChild(channelDrop)
+    SkinDropdown(channelDrop)
+
+    local talentsHeading = AceGUI:Create("Heading")
+    talentsHeading:SetText("Group Creation")
+    talentsHeading:SetFullWidth(true)
+    SkinHeading(talentsHeading)
+    container:AddChild(talentsHeading)
+
+    local tplDesc = AceGUI:Create("Label")
+    tplDesc:SetText("Talent Command template used by 'Set Talents'. Tokens: {name} {class} {spec} {group} {slot}")
+    tplDesc:SetFullWidth(true)
+    SkinLabel(tplDesc)
+    container:AddChild(tplDesc)
+
+    local talentCmd = AceGUI:Create("EditBox")
+    talentCmd:SetLabel("Talent Command")
+    talentCmd:SetText(EchoesDB.talentCommandTemplate or "")
+    talentCmd:SetFullWidth(true)
+    talentCmd:SetCallback("OnEnterPressed", function(widget, event, text)
+        EchoesDB.talentCommandTemplate = tostring(text or "")
+    end)
+    container:AddChild(talentCmd)
+    SkinEditBox(talentCmd)
+    if talentCmd.DisableButton then talentCmd:DisableButton(true) end
 end
 
 ------------------------------------------------------------
