@@ -30,6 +30,30 @@ local function EnsureDefaults()
     EchoesDB.groupTemplates     = EchoesDB.groupTemplates     or {}
     EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
 
+    -- Default built-in presets (only if user hasn't saved one already)
+    -- 10 Man: leave Group 1 Slot 1 open for the player.
+    if not EchoesDB.groupTemplates[1] then
+        EchoesDB.groupTemplates[1] = {
+            name = "10 Man",
+            slots = {
+                [1] = {
+                    [1] = nil,
+                    [2] = { class = "Paladin", specLabel = "Protection" },
+                    [3] = { class = "Warrior", specLabel = "Protection" },
+                    [4] = { class = "Priest",  specLabel = "Discipline" },
+                    [5] = { class = "Druid",   specLabel = "Restoration" },
+                },
+                [2] = {
+                    [1] = { class = "Rogue",  specLabel = "Combat" },
+                    [2] = { class = "Paladin", specLabel = "Retribution" },
+                    [3] = { class = "Shaman", specLabel = "Elemental" },
+                    [4] = { class = "Mage",   specLabel = "Arcane" },
+                    [5] = { class = "Druid",  specLabel = "Balance" },
+                },
+            },
+        }
+    end
+
     -- Optional server-specific command template for setting talents/specs.
     -- Tokens: {name} {class} {spec} {group} {slot}
     EchoesDB.talentCommandTemplate = EchoesDB.talentCommandTemplate or ""
@@ -708,6 +732,18 @@ local function SkinDropdown(widget)
 
     local function ApplyEchoesGroupSlotSelectedColor()
         if not widget.dropdown or widget.dropdown._EchoesDropdownKind ~= "groupSlot" then return end
+
+        -- Filled roster slots store an explicit classFile so we can keep the name
+        -- class-colored even while disabled.
+        if widget.dropdown._EchoesFilledClassFile then
+            local colors = rawget(_G, "RAID_CLASS_COLORS")
+            local c = colors and colors[widget.dropdown._EchoesFilledClassFile]
+            if c and widget.text and widget.text.SetTextColor then
+                widget.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+                return
+            end
+        end
+
         if widget.dropdown._EchoesForceDisabledGrey then
             if widget.text and widget.text.SetTextColor then
                 widget.text:SetTextColor(0.55, 0.55, 0.55, 1)
@@ -874,6 +910,11 @@ SkinEditBox = function(widget)
 
     if widget.editbox.SetTextColor then
         widget.editbox:SetTextColor(0.90, 0.85, 0.70, 1)
+    end
+
+    -- Make text selection highlight obvious (default highlight can be too dark on our theme).
+    if widget.editbox.SetHighlightColor then
+        widget.editbox:SetHighlightColor(0.92, 0.92, 0.92, 0.45)
     end
 
     if widget.label and widget.label.SetTextColor then
@@ -1650,8 +1691,29 @@ function Echoes:BuildGroupTab(container)
 
     local INPUT_HEIGHT = 24
 
-    -- Clamp template index to our current preset count (now 2).
-    EchoesDB.groupTemplateIndex = Clamp(tonumber(EchoesDB.groupTemplateIndex) or 1, 1, #GROUP_TEMPLATES)
+    local PRESET_COUNT = #GROUP_TEMPLATES
+    -- Use a large numeric key so AceGUI's sorted dropdown puts this at the end.
+    local NEW_PRESET_KEY = 99999
+
+    local function GetMaxTemplateIndex()
+        local maxIdx = PRESET_COUNT
+        if EchoesDB.groupTemplates then
+            for k in pairs(EchoesDB.groupTemplates) do
+                local n = tonumber(k)
+                if n and n > maxIdx then maxIdx = n end
+            end
+        end
+        if EchoesDB.groupTemplateNames then
+            for k in pairs(EchoesDB.groupTemplateNames) do
+                local n = tonumber(k)
+                if n and n > maxIdx then maxIdx = n end
+            end
+        end
+        return maxIdx
+    end
+
+    -- Clamp template index to presets + any user templates.
+    EchoesDB.groupTemplateIndex = Clamp(tonumber(EchoesDB.groupTemplateIndex) or 1, 1, GetMaxTemplateIndex())
 
     local headerPadTop = AceGUI:Create("SimpleGroup")
     headerPadTop:SetFullWidth(true)
@@ -1685,13 +1747,32 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(topSpacer)
 
     local function GetTemplateDisplayName(i)
-        return GROUP_TEMPLATES[i] or ("Template " .. tostring(i))
+        i = tonumber(i)
+        if not i then return "" end
+        if i <= PRESET_COUNT then
+            return GROUP_TEMPLATES[i] or ("Template " .. tostring(i))
+        end
+        if EchoesDB.groupTemplateNames and EchoesDB.groupTemplateNames[i] and EchoesDB.groupTemplateNames[i] ~= "" then
+            return tostring(EchoesDB.groupTemplateNames[i])
+        end
+        local tpl = EchoesDB.groupTemplates and EchoesDB.groupTemplates[i]
+        if tpl and tpl.name and tpl.name ~= "" then
+            return tostring(tpl.name)
+        end
+        return "Preset " .. tostring(i - PRESET_COUNT)
     end
 
-    local templateValues = {}
-    for i = 1, #GROUP_TEMPLATES do
-        templateValues[i] = GetTemplateDisplayName(i)
+    local function BuildTemplateValues()
+        local vals = {}
+        local maxIdx = GetMaxTemplateIndex()
+        for i = 1, maxIdx do
+            vals[i] = GetTemplateDisplayName(i)
+        end
+        vals[NEW_PRESET_KEY] = "<New Preset>"
+        return vals
     end
+
+    local templateValues = BuildTemplateValues()
 
     local templateDrop = AceGUI:Create("Dropdown")
     templateDrop:SetLabel("")
@@ -1702,6 +1783,24 @@ function Echoes:BuildGroupTab(container)
     self.UI.groupTemplateNameEdit = nameEdit
     self.UI.groupTemplateDrop = templateDrop
 
+    local function SetButtonEnabled(btn, enabled)
+        if not btn then return end
+        if btn.SetDisabled then btn:SetDisabled(not enabled) end
+        if btn.frame and btn.frame.SetAlpha then
+            btn.frame:SetAlpha(enabled and 1 or 0.45)
+        end
+        if btn.text and btn.text.SetTextColor then
+            if enabled then
+                btn.text:SetTextColor(0.90, 0.85, 0.70, 1)
+            else
+                btn.text:SetTextColor(0.55, 0.55, 0.55, 1)
+            end
+        end
+    end
+
+    local saveBtn
+    local deleteBtn
+
     local function RefreshTemplateHeader(selectedIndex)
         local idx = tonumber(selectedIndex) or (EchoesDB.groupTemplateIndex or 1)
         EchoesDB.groupTemplateIndex = idx
@@ -1711,8 +1810,7 @@ function Echoes:BuildGroupTab(container)
             nameEdit:SetText(displayName or "")
         end
 
-        -- Presets are fixed: do not allow renaming.
-        local allowRename = false
+        local allowRename = (idx and idx > PRESET_COUNT) and true or false
         if nameEdit and nameEdit.SetDisabled then
             nameEdit:SetDisabled(not allowRename)
         end
@@ -1723,14 +1821,62 @@ function Echoes:BuildGroupTab(container)
                 nameEdit.editbox:SetTextColor(0.55, 0.55, 0.55, 1)
             end
         end
+
+        -- Disable Save/Delete for built-in presets.
+        local allowSaveDelete = (idx and idx > PRESET_COUNT) and true or false
+        SetButtonEnabled(saveBtn, allowSaveDelete)
+        SetButtonEnabled(deleteBtn, allowSaveDelete)
     end
 
     -- Forward declarations (used by template helpers below, populated later).
     local slotValues = {}
     local ALTBOT_INDEX
 
-    local function ApplyTemplateToFreeSlots(templateIndex)
+    local function ClearEmptySlot(slot)
+        if not slot or slot._EchoesMember then return end
+
+        if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
+            slot.classDrop._EchoesSuppress = true
+            slot.classDrop:SetList(slotValues)
+            slot.classDrop:SetValue(1) -- None
+            slot.classDrop._EchoesSelectedValue = 1
+            slot.classDrop._EchoesAltbotName = nil
+            if slot.classDrop.dropdown then
+                slot.classDrop.dropdown._EchoesFilledClassFile = nil
+            end
+            slot.classDrop._EchoesSuppress = nil
+
+            if self.UI and self.UI._GroupSlotApplyColor then
+                self.UI._GroupSlotApplyColor(slot.classDrop, 1)
+            end
+            if slot.classDrop._EchoesUpdateNameButtonVisibility then
+                slot.classDrop._EchoesUpdateNameButtonVisibility(1)
+            end
+        end
+
+        if slot.cycleBtn then
+            slot.cycleBtn.values = { unpack(DEFAULT_CYCLE_VALUES) }
+            slot.cycleBtn.index = 1
+            slot.cycleBtn._EchoesLocked = false
+            if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
+        end
+    end
+
+    local function LoadPreset(templateIndex)
         local idx = tonumber(templateIndex) or 1
+
+        -- Always clear empty slots first so loading is deterministic.
+        if self.UI and self.UI.groupSlots then
+            for g = 1, 5 do
+                for p = 1, 5 do
+                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                    if slot then
+                        ClearEmptySlot(slot)
+                    end
+                end
+            end
+        end
+
         local tpl = EchoesDB.groupTemplates and EchoesDB.groupTemplates[idx]
         local slots = tpl and tpl.slots
         if not slots or not self.UI or not self.UI.groupSlots then return end
@@ -1758,6 +1904,9 @@ function Echoes:BuildGroupTab(container)
                             slot.classDrop._EchoesAltbotName = (entry.altName and tostring(entry.altName)) or nil
                         else
                             slot.classDrop._EchoesAltbotName = nil
+                        end
+                        if slot.classDrop.dropdown then
+                            slot.classDrop.dropdown._EchoesFilledClassFile = nil
                         end
                         slot.classDrop._EchoesSuppress = nil
 
@@ -1790,10 +1939,108 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
+    local function SavePreset(templateIndex)
+        local idx = tonumber(templateIndex) or 1
+        if idx <= PRESET_COUNT then return false end
+        if not self.UI or not self.UI.groupSlots then return false end
+
+        EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
+        EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
+
+        local newName = nil
+        if nameEdit and nameEdit.editbox and nameEdit.editbox.GetText then
+            newName = tostring(nameEdit.editbox:GetText() or "")
+            newName = newName:gsub("^%s+", ""):gsub("%s+$", "")
+            if newName == "" then newName = nil end
+        end
+        if newName then
+            EchoesDB.groupTemplateNames[idx] = newName
+        end
+
+        local tpl = { name = newName or GetTemplateDisplayName(idx), slots = {} }
+        for g = 1, 5 do
+            tpl.slots[g] = {}
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                local entry = nil
+                if slot then
+                    if slot._EchoesMember and slot._EchoesMember.name and not slot._EchoesMember.isPlayer then
+                        -- If you're currently grouped, treat roster members as Altbot-by-name.
+                        entry = {
+                            class = "Altbot",
+                            altName = tostring(slot._EchoesMember.name),
+                            specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil,
+                        }
+                    elseif (not slot._EchoesMember) and slot.classDrop then
+                        local dd = slot.classDrop
+                        local value = dd._EchoesSelectedValue or dd.value or 1
+                        local classText = slotValues[value] or "None"
+                        if classText ~= "None" then
+                            local altName = dd._EchoesAltbotName
+                            if altName then
+                                altName = tostring(altName or "")
+                                altName = altName:gsub("^%s+", ""):gsub("%s+$", "")
+                                if altName == "" then altName = nil end
+                            end
+
+                            local specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil
+                            if specLabel == "None" then specLabel = nil end
+
+                            entry = { class = classText, altName = altName, specLabel = specLabel }
+                        end
+                    end
+                end
+                tpl.slots[g][p] = entry
+            end
+        end
+
+        EchoesDB.groupTemplates[idx] = tpl
+        return true
+    end
+
     templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
+        if templateDrop._EchoesSuppress then return end
+
+        local prev = EchoesDB.groupTemplateIndex or 1
+        if value == NEW_PRESET_KEY then
+            -- Revert immediately; creation will select the new preset.
+            templateDrop._EchoesSuppress = true
+            templateDrop:SetValue(prev)
+            templateDrop._EchoesSuppress = nil
+
+            self:ShowNamePrompt({
+                title = "New Preset",
+                initialText = "",
+                onAccept = function(text)
+                    local name = tostring(text or "")
+                    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+                    if name == "" then return end
+
+                    EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
+                    EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
+
+                    local newIndex = GetMaxTemplateIndex() + 1
+                    EchoesDB.groupTemplateIndex = newIndex
+                    EchoesDB.groupTemplateNames[newIndex] = name
+
+                    local vals = BuildTemplateValues()
+                    if templateDrop and templateDrop.SetList then
+                        templateDrop:SetList(vals)
+                    end
+                    templateDrop._EchoesSuppress = true
+                    templateDrop:SetValue(newIndex)
+                    templateDrop._EchoesSuppress = nil
+                    RefreshTemplateHeader(newIndex)
+                    EchoesDB.groupTemplates[newIndex] = EchoesDB.groupTemplates[newIndex] or { name = name, slots = {} }
+                    LoadPreset(newIndex)
+                end,
+            })
+            return
+        end
+
         EchoesDB.groupTemplateIndex = value
         RefreshTemplateHeader(value)
-        ApplyTemplateToFreeSlots(value)
+        LoadPreset(value)
     end)
     topGroup:AddChild(templateDrop)
     SkinDropdown(templateDrop)
@@ -1805,51 +2052,16 @@ function Echoes:BuildGroupTab(container)
     topSpacer2:SetLayout("Flow")
     topGroup:AddChild(topSpacer2)
 
-    local saveBtn = AceGUI:Create("Button")
+    saveBtn = AceGUI:Create("Button")
     saveBtn:SetText("Save")
     saveBtn:SetRelativeWidth(0.12)
     saveBtn:SetHeight(INPUT_HEIGHT)
     saveBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
-        EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
+        if idx <= PRESET_COUNT then return end
+        if not SavePreset(idx) then return end
 
-        local newName = nil
-        -- Presets are fixed: ignore any name edits.
-
-        local tpl = { name = newName or GetTemplateDisplayName(idx), slots = {} }
-        for g = 1, 5 do
-            tpl.slots[g] = {}
-            for p = 1, 5 do
-                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
-                if slot and not slot._EchoesMember and slot.classDrop then
-                    local dd = slot.classDrop
-                    local value = dd._EchoesSelectedValue or dd.value or 1
-                    local classText = slotValues[value] or "None"
-
-                    local altName = dd._EchoesAltbotName
-                    if altName then
-                        altName = tostring(altName or "")
-                        altName = altName:gsub("^%s+", ""):gsub("%s+$", "")
-                        if altName == "" then altName = nil end
-                    end
-
-                    local specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil
-                    if specLabel == "None" then specLabel = nil end
-
-                    tpl.slots[g][p] = { class = classText, altName = altName, specLabel = specLabel }
-                else
-                    tpl.slots[g][p] = nil
-                end
-            end
-        end
-
-        EchoesDB.groupTemplates[idx] = tpl
-
-        -- Refresh dropdown display names (custom rename)
-        local vals = {}
-        for i = 1, #GROUP_TEMPLATES do
-            vals[i] = GetTemplateDisplayName(i)
-        end
+        local vals = BuildTemplateValues()
         if templateDrop and templateDrop.SetList then
             templateDrop:SetList(vals)
         end
@@ -1860,28 +2072,42 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(saveBtn)
     SkinButton(saveBtn)
 
-    local deleteBtn = AceGUI:Create("Button")
+    deleteBtn = AceGUI:Create("Button")
     deleteBtn:SetText("Delete")
     deleteBtn:SetRelativeWidth(0.12)
     deleteBtn:SetHeight(INPUT_HEIGHT)
     deleteBtn:SetCallback("OnClick", function()
         local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
+        if idx <= PRESET_COUNT then return end
         if EchoesDB.groupTemplates then
             EchoesDB.groupTemplates[idx] = nil
         end
-
-        local vals = {}
-        for i = 1, #GROUP_TEMPLATES do
-            vals[i] = GetTemplateDisplayName(i)
+        if EchoesDB.groupTemplateNames then
+            EchoesDB.groupTemplateNames[idx] = nil
         end
+
+        local newMax = GetMaxTemplateIndex()
+        if idx > newMax then
+            EchoesDB.groupTemplateIndex = Clamp(newMax, 1, newMax)
+        end
+
+        local vals = BuildTemplateValues()
         if templateDrop and templateDrop.SetList then
             templateDrop:SetList(vals)
         end
-        RefreshTemplateHeader(idx)
+        if templateDrop and templateDrop._EchoesSuppress ~= true and templateDrop.SetValue then
+            templateDrop._EchoesSuppress = true
+            templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
+            templateDrop._EchoesSuppress = nil
+        end
+        RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
         Echoes_Print("Group setup deleted.")
     end)
     topGroup:AddChild(deleteBtn)
     SkinButton(deleteBtn)
+
+    -- Apply initial disabled state
+    RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
 
     local headerPadR = AceGUI:Create("SimpleGroup")
     headerPadR:SetRelativeWidth(0.01)
@@ -2331,7 +2557,7 @@ function Echoes:BuildGroupTab(container)
 
     -- Initialize from roster once the page is built.
     self:UpdateGroupCreationFromRoster(true)
-    ApplyTemplateToFreeSlots(EchoesDB.groupTemplateIndex or 1)
+    LoadPreset(EchoesDB.groupTemplateIndex or 1)
 end
 
 local function Echoes_GetGroupSlotIndexForClassFile(classFile)
@@ -2355,14 +2581,9 @@ function Echoes:UpdateGroupCreationFromRoster(force)
     local applyColor = self.UI._GroupSlotApplyColor
     local colors = rawget(_G, "RAID_CLASS_COLORS")
 
-    local function GreyTintClassColor(c)
+    local function ClassColorRGB(c)
         if not c then return 1, 1, 1 end
-        local grey = 0.65
-        local mix = 0.25
-        local r = (c.r or 1) * (1 - mix) + grey * mix
-        local g = (c.g or 1) * (1 - mix) + grey * mix
-        local b = (c.b or 1) * (1 - mix) + grey * mix
-        return r, g, b
+        return c.r or 1, c.g or 1, c.b or 1
     end
 
     local function SetEnabledForWidget(widget, enabled)
@@ -2442,6 +2663,9 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         SetNameButtonMode(slot, "name")
 
         if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
+            if slot.classDrop.dropdown then
+                slot.classDrop.dropdown._EchoesFilledClassFile = nil
+            end
             local baseList = self.UI and self.UI._GroupSlotSlotValues
             slot.classDrop._EchoesSuppress = true
             if baseList then
@@ -2468,6 +2692,9 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         -- Occupied slots: show the member name in the dropdown display.
         local c = member.classFile and colors and colors[member.classFile]
         if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
+            if slot.classDrop.dropdown then
+                slot.classDrop.dropdown._EchoesFilledClassFile = member.classFile
+            end
             slot.classDrop._EchoesSuppress = true
             slot.classDrop:SetList({ [1] = member.name or "" })
             slot.classDrop:SetValue(1)
@@ -2475,7 +2702,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
             if slot.classDrop.text and slot.classDrop.text.SetTextColor then
                 if c then
-                    local r, g, b = GreyTintClassColor(c)
+                    local r, g, b = ClassColorRGB(c)
                     slot.classDrop.text:SetTextColor(r, g, b, 1)
                 else
                     slot.classDrop.text:SetTextColor(1, 1, 1, 1)
@@ -2483,6 +2710,16 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             end
         end
         SetEnabledForDropdown(slot.classDrop, false)
+
+        -- AceGUI disabled state can override our text color; re-apply after disabling.
+        if slot.classDrop and slot.classDrop.text and slot.classDrop.text.SetTextColor then
+            if c then
+                local r, g, b = ClassColorRGB(c)
+                slot.classDrop.text:SetTextColor(r, g, b, 1)
+            else
+                slot.classDrop.text:SetTextColor(1, 1, 1, 1)
+            end
+        end
 
         -- Name button: Kick for filled non-player slots; hidden for player slot.
         SetEnabledForWidget(slot.nameBtn, true)
