@@ -1583,18 +1583,61 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
     end
 
+    local function SetNameButtonVisible(slot, visible)
+        if not slot or not slot.nameBtn then return end
+        local f = slot.nameBtn.frame
+        if not f then return end
+
+        if visible then
+            if f.SetAlpha then f:SetAlpha(1) end
+            if f.Show then f:Show() end
+            if f.EnableMouse then f:EnableMouse(true) end
+        else
+            if f.EnableMouse then f:EnableMouse(false) end
+            if f.SetAlpha then f:SetAlpha(0) end
+            if f.Hide then f:Hide() end
+        end
+    end
+
+    local function SetNameButtonMode(slot, mode, member)
+        if not slot or not slot.nameBtn then return end
+
+        if mode == "kick" and member and member.name and member.name ~= "" then
+            slot.nameBtn:SetText("Kick")
+            if slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
+                slot.nameBtn.text:SetTextColor(1.0, 0.35, 0.35, 1)
+            end
+            slot.nameBtn:SetCallback("OnClick", function()
+                -- 1) Whisper the player the text "logout"
+                if type(SendChatMessage) == "function" then
+                    SendChatMessage("logout", "WHISPER", nil, member.name)
+                end
+
+                -- 2) Remove them from the group (party or raid) if possible
+                if type(UninviteUnit) == "function" then
+                    UninviteUnit(member.name)
+                end
+            end)
+        else
+            slot.nameBtn:SetText("Name")
+            if slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
+                slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
+            end
+            slot.nameBtn:SetCallback("OnClick", function()
+                Echoes_Print("Name clicked (stub).")
+            end)
+        end
+    end
+
     local function ResetSlot(slot)
         if not slot then return end
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
         SetEnabledForWidget(slot.nameBtn, true)
+        SetNameButtonVisible(slot, true)
 
-        if slot.nameBtn and slot.nameBtn.SetText then
-            slot.nameBtn:SetText("Name")
-        end
-        if slot.nameBtn and slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
-            slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
-        end
+        slot._EchoesMember = nil
+        SetNameButtonMode(slot, "name")
 
         if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
             local baseList = self.UI and self.UI._GroupSlotSlotValues
@@ -1617,6 +1660,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
     local function FillSlot(slot, member)
         if not slot or not member then return end
 
+        slot._EchoesMember = member
+
         -- Occupied slots: show the member name in the dropdown display.
         local c = member.classFile and colors and colors[member.classFile]
         if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
@@ -1636,14 +1681,14 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
         SetEnabledForDropdown(slot.classDrop, false)
 
-        -- Name button stays available for future actions; keep default label.
-        if slot.nameBtn and slot.nameBtn.SetText then
-            slot.nameBtn:SetText("Name")
-        end
-        if slot.nameBtn and slot.nameBtn.text and slot.nameBtn.text.SetTextColor then
-            slot.nameBtn.text:SetTextColor(0.90, 0.85, 0.70, 1)
-        end
+        -- Name button: Kick for filled non-player slots; hidden for player slot.
         SetEnabledForWidget(slot.nameBtn, true)
+        SetNameButtonVisible(slot, not member.isPlayer)
+        if not member.isPlayer then
+            SetNameButtonMode(slot, "kick", member)
+        else
+            SetNameButtonMode(slot, "name")
+        end
 
         if slot.cycleBtn then
             local classIndex = Echoes_GetGroupSlotIndexForClassFile(member.classFile)
@@ -1672,6 +1717,9 @@ function Echoes:UpdateGroupCreationFromRoster(force)
     local n = (type(GetNumRaidMembers) == "function" and GetNumRaidMembers()) or 0
     local inRaid = (UnitInRaid and UnitInRaid("player") and UnitInRaid("player") ~= 0 and n > 0)
 
+    local nParty = (type(GetNumPartyMembers) == "function" and GetNumPartyMembers()) or 0
+    local inParty = (not inRaid) and (nParty and nParty > 0)
+
     if inRaid then
         for i = 1, n do
             -- 3.3.5 GetRaidRosterInfo return order: name, rank, subgroup, level, class, classFile, ...
@@ -1688,6 +1736,26 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                     isPlayer = (UnitIsUnit and UnitIsUnit(unit, "player")) or false,
                 }
             end
+        end
+    elseif inParty then
+        -- Party layout: mirror player first, then party1..party4.
+        membersByGroup[1] = {
+            {
+                unit = "player",
+                name = UnitName("player"),
+                classFile = select(2, UnitClass("player")),
+                isPlayer = true,
+            },
+        }
+
+        for i = 1, math.min(4, nParty) do
+            local unit = "party" .. i
+            membersByGroup[1][#membersByGroup[1] + 1] = {
+                unit = unit,
+                name = UnitName(unit),
+                classFile = select(2, UnitClass(unit)),
+                isPlayer = false,
+            }
         end
     else
         membersByGroup[1] = {
