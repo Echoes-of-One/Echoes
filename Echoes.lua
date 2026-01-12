@@ -37,6 +37,9 @@ local function EnsureDefaults()
     EchoesDB.minimapAngle       = EchoesDB.minimapAngle       or 220
     EchoesDB.uiScale            = EchoesDB.uiScale            or 1.0
 
+    -- Main window movement lock (false = movable)
+    EchoesDB.frameLocked        = (EchoesDB.frameLocked ~= nil) and EchoesDB.frameLocked or false
+
     -- Group Creation templates
     EchoesDB.groupTemplates     = EchoesDB.groupTemplates     or {}
     EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
@@ -194,6 +197,49 @@ local function SkinMainFrame(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
 
+    local function Echoes_SetLockButtonVisual(btn, locked)
+        if not btn then return end
+
+        -- These are Blizzard UI texture paths (3.3.5-compatible in most clients).
+        -- If a client is missing them, the text fallback still shows state.
+        local lockedTex = {
+            normal    = "Interface\\Buttons\\UI-LockButton-LockedUp",
+            pushed    = "Interface\\Buttons\\UI-LockButton-LockedDown",
+            highlight = "Interface\\Buttons\\UI-LockButton-LockedHighlight",
+        }
+        local unlockedTex = {
+            normal    = "Interface\\Buttons\\UI-LockButton-UnlockedUp",
+            pushed    = "Interface\\Buttons\\UI-LockButton-UnlockedDown",
+            highlight = "Interface\\Buttons\\UI-LockButton-UnlockedHighlight",
+        }
+
+        local t = locked and lockedTex or unlockedTex
+        if btn.SetNormalTexture then btn:SetNormalTexture(t.normal) end
+        if btn.SetPushedTexture then btn:SetPushedTexture(t.pushed) end
+        if btn.SetHighlightTexture then
+            btn:SetHighlightTexture(t.highlight)
+            local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+            if ht and ht.SetBlendMode then ht:SetBlendMode("ADD") end
+        end
+
+        do
+            local nt = btn.GetNormalTexture and btn:GetNormalTexture()
+            if nt then nt._EchoesNoStrip = true end
+            local pt = btn.GetPushedTexture and btn:GetPushedTexture()
+            if pt then pt._EchoesNoStrip = true end
+            local ht = btn.GetHighlightTexture and btn:GetHighlightTexture()
+            if ht then ht._EchoesNoStrip = true end
+        end
+
+        if btn._EchoesTextFallback then
+            btn._EchoesTextFallback:SetText(locked and "L" or "U")
+        end
+    end
+
+    local function Echoes_IsFrameLocked()
+        return EchoesDB and EchoesDB.frameLocked and true or false
+    end
+
     -- Anchor once to TOPLEFT so size changes grow right/down
     if not f._EchoesAnchored then
         f._EchoesAnchored = true
@@ -211,6 +257,7 @@ local function SkinMainFrame(widget)
     f:SetMaxResize(w, h)
     f:SetScript("OnMouseDown", function(self, button)
         if button ~= "LeftButton" then return end
+        if Echoes_IsFrameLocked() then return end
         -- Don't start dragging when clicking our buttons (or any button child).
         if type(GetMouseFocus) == "function" then
             local focus = GetMouseFocus()
@@ -222,6 +269,7 @@ local function SkinMainFrame(widget)
     end)
     f:SetScript("OnMouseUp", function(self, button)
         if button ~= "LeftButton" then return end
+        if Echoes_IsFrameLocked() then return end
         self:StopMovingOrSizing()
 
         -- Normalize anchor to TOPLEFT after moving so resizing (tab switches)
@@ -284,6 +332,47 @@ local function SkinMainFrame(widget)
         SkinBackdrop(tb, 0.98)
         tb:SetBackdropBorderColor(0, 0, 0, 0)
         f.EchoesTitleBar = tb
+    end
+
+    -- Title-bar Lock button (toggles frameLocked)
+    if f.EchoesTitleBar and not f.EchoesLockButton then
+        local lb = CreateFrame("Button", nil, f.EchoesTitleBar)
+        lb:SetSize(18, 18)
+        lb:SetPoint("RIGHT", f.EchoesTitleBar, "RIGHT", -6, 0)
+        lb:SetFrameLevel((f.EchoesTitleBar:GetFrameLevel() or 0) + 10)
+        if lb.RegisterForClicks then lb:RegisterForClicks("AnyUp") end
+
+        -- Make it clickable even if another skin tries to strip textures.
+        lb._EchoesNoStrip = true
+
+        local fallback = lb:CreateFontString(nil, "OVERLAY")
+        fallback:SetPoint("CENTER", lb, "CENTER", 0, 0)
+        fallback:SetTextColor(0.95, 0.95, 0.95, 0.9)
+        SetEchoesFont(fallback, 11, ECHOES_FONT_FLAGS)
+        lb._EchoesTextFallback = fallback
+
+        lb:SetScript("OnEnter", function(self)
+            if GameTooltip and GameTooltip.SetOwner then
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText(Echoes_IsFrameLocked() and "Unlock window" or "Lock window")
+                GameTooltip:Show()
+            end
+        end)
+        lb:SetScript("OnLeave", function()
+            if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
+        end)
+        lb:SetScript("OnClick", function()
+            EchoesDB.frameLocked = not Echoes_IsFrameLocked()
+            Echoes_SetLockButtonVisual(lb, Echoes_IsFrameLocked())
+            if GameTooltip and GameTooltip.SetText then
+                GameTooltip:SetText(Echoes_IsFrameLocked() and "Unlock window" or "Lock window")
+            end
+        end)
+
+        f.EchoesLockButton = lb
+        Echoes_SetLockButtonVisual(lb, Echoes_IsFrameLocked())
+    elseif f.EchoesLockButton then
+        Echoes_SetLockButtonVisual(f.EchoesLockButton, Echoes_IsFrameLocked())
     end
 
     if widget.titletext then
@@ -512,6 +601,10 @@ local function SkinMainFrame(widget)
             end
             if self.EchoesSpecButton and self.EchoesSpecButton._EchoesLabel then
                 SetEchoesFont(self.EchoesSpecButton._EchoesLabel, 12, ECHOES_FONT_FLAGS)
+            end
+
+            if self.EchoesLockButton then
+                Echoes_SetLockButtonVisual(self.EchoesLockButton, Echoes_IsFrameLocked())
             end
         end)
     end
