@@ -76,6 +76,18 @@ jobs:
           cp -R Ace3 dist/
 
           (cd dist && zip -r "../Echoes-${TAG}.zip" Echoes Ace3)
+          cp "Echoes-${TAG}.zip" "Echoes-latest-${TAG}.zip"
+
+      - name: Move 'latest' git tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          git fetch --tags --force
+          git tag -f latest "${TAG}"
+          git push --force origin latest
 
       - name: Create GitHub release
         uses: ncipollo/release-action@v1
@@ -85,6 +97,19 @@ jobs:
           body: ${{ steps.changelog.outputs.notes }}
           artifacts: Echoes-${{ steps.changelog.outputs.tag }}.zip
           artifactContentType: application/zip
-          makeLatest: true
+          makeLatest: false
           allowUpdates: false
+          prerelease: false
+
+      - name: Create/Update 'latest' GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: latest
+          name: latest (${{ steps.changelog.outputs.tag }})
+          body: ${{ steps.changelog.outputs.notes }}
+          artifacts: Echoes-latest-${{ steps.changelog.outputs.tag }}.zip
+          artifactContentType: application/zip
+          makeLatest: true
+          allowUpdates: true
+          replacesArtifacts: true
           prerelease: false
