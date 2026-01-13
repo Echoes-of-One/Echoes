@@ -150,6 +150,54 @@ local function SetEchoesFont(fontString, size, flags)
     fontString:SetFont(ECHOES_FONT_PATH, tonumber(size) or 12, flags or ECHOES_FONT_FLAGS)
 end
 
+-- Re-assert Echoes font face on any FontStrings under a given frame.
+-- This keeps Echoes text independent from other addons that modify Blizzard FontObjects.
+-- We only swap the font *face* and preserve size/flags to avoid layout surprises.
+local function Echoes_ForceFontFaceOnFrame(rootFrame)
+    if not rootFrame or type(rootFrame) ~= "table" or not rootFrame.GetRegions then return end
+
+    local visited = {}
+
+    local function ApplyFontString(fs)
+        if not fs or not fs.GetFont or not fs.SetFont then return end
+        local curPath, curSize, curFlags = fs:GetFont()
+        local size = tonumber(curSize) or 12
+        local flags = curFlags or ECHOES_FONT_FLAGS
+        -- Only change the face; keep size/flags.
+        if curPath ~= ECHOES_FONT_PATH then
+            fs:SetFont(ECHOES_FONT_PATH, size, flags)
+        end
+    end
+
+    local function Walk(frame)
+        if not frame or visited[frame] then return end
+        visited[frame] = true
+
+        local okRegions, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 = pcall(frame.GetRegions, frame)
+        if okRegions then
+            local regs = { r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 }
+            -- If there are more than 10 regions, fall back to table packing.
+            if frame.GetNumRegions and frame:GetNumRegions() and frame:GetNumRegions() > 10 then
+                regs = { frame:GetRegions() }
+            end
+            for _, r in ipairs(regs) do
+                if r and r.IsObjectType and r:IsObjectType("FontString") then
+                    ApplyFontString(r)
+                end
+            end
+        end
+
+        if frame.GetChildren then
+            local kids = { frame:GetChildren() }
+            for _, child in ipairs(kids) do
+                Walk(child)
+            end
+        end
+    end
+
+    Walk(rootFrame)
+end
+
 local function StripFrameTextures(frame)
     if not frame then return end
     if frame.SetNormalTexture then frame:SetNormalTexture(nil) end
@@ -668,6 +716,9 @@ local function SkinMainFrame(widget)
             if self.EchoesLockButton then
                 Echoes_SetLockButtonVisual(self.EchoesLockButton, Echoes_IsFrameLocked())
             end
+
+            -- Re-assert Echoes font face on any FontStrings within this window.
+            Echoes_ForceFontFaceOnFrame(self)
         end)
     end
 end
@@ -935,6 +986,7 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
     end)
     f:SetScript("OnShow", function(self)
         SkinBackdrop(self, 0.92)
+        Echoes_ForceFontFaceOnFrame(self)
         if self._EchoesTitle then
             SetEchoesFont(self._EchoesTitle, 12, ECHOES_FONT_FLAGS)
         end
@@ -2461,7 +2513,9 @@ function Echoes:BuildBotTab(container)
         classLabel.frame:SetBackdropBorderColor(0, 0, 0, 0)
     end
     if classLabel.frame and classLabel.frame.CreateFontString then
-        local fs = classLabel.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        local fs = classLabel.frame:CreateFontString(nil, "OVERLAY")
+        -- WoW 3.3.5 throws "Font not set" if SetText runs before SetFont.
+        SetEchoesFont(fs, 11, ECHOES_FONT_FLAGS)
         fs:SetText("Class")
         fs:SetJustifyH("LEFT")
         fs:SetJustifyV("MIDDLE")
@@ -2470,7 +2524,6 @@ function Echoes:BuildBotTab(container)
         fs:SetPoint("TOP", classLabel.frame, "TOP", 0, 0)
         fs:SetPoint("BOTTOM", classLabel.frame, "BOTTOM", 0, 0)
         if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
-        SetEchoesFont(fs, 11, ECHOES_FONT_FLAGS)
         classLabel._EchoesFontString = fs
     end
 
@@ -2783,7 +2836,9 @@ function Echoes:BuildBotTab(container)
         end
 
         if header.frame and header.frame.CreateFontString then
-            local fs = header.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            local fs = header.frame:CreateFontString(nil, "OVERLAY")
+            -- WoW 3.3.5 throws "Font not set" if SetText runs before SetFont.
+            SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
             fs:SetText(row.label)
             -- Center within the left half of the header.
             fs:SetJustifyH("CENTER")
@@ -2791,7 +2846,6 @@ function Echoes:BuildBotTab(container)
             fs:SetPoint("LEFT", header.frame, "LEFT", 10, 0)
             fs:SetPoint("RIGHT", header.frame, "CENTER", -10, 0)
             if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
-            SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
             header._EchoesRoleHeaderFS = fs
         end
 
