@@ -306,40 +306,9 @@ local function SkinMainFrame(widget)
     local w, h = f:GetWidth(), f:GetHeight()
     f:SetMinResize(w, h)
     f:SetMaxResize(w, h)
-    f:SetScript("OnMouseDown", function(self, button)
-        if button ~= "LeftButton" then return end
-        if Echoes_IsFrameLocked() then return end
-        -- Don't start dragging when clicking our buttons (or any button child).
-        if type(GetMouseFocus) == "function" then
-            local focus = GetMouseFocus()
-            if focus and focus ~= self and focus.IsObjectType and focus:IsObjectType("Button") then
-                return
-            end
-        end
-        self:StartMoving()
-    end)
-    f:SetScript("OnMouseUp", function(self, button)
-        if button ~= "LeftButton" then return end
-        if Echoes_IsFrameLocked() then return end
-        self:StopMovingOrSizing()
-
-        -- Normalize anchor to TOPLEFT after moving so resizing (tab switches)
-        -- doesn't shift the top bar.
-        if self.GetLeft and self.GetTop and UIParent and self.SetPoint then
-            local left = self:GetLeft()
-            local top = self:GetTop()
-            if left and top then
-                local scale = (self.GetEffectiveScale and self:GetEffectiveScale()) or 1
-                local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-                if scale <= 0 then scale = 1 end
-                if parentScale <= 0 then parentScale = 1 end
-                local x = left * scale / parentScale
-                local y = top * scale / parentScale
-                self:ClearAllPoints()
-                self:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-            end
-        end
-    end)
+    -- Restrict dragging to the title text area (see EchoesDragRegion below).
+    f:SetScript("OnMouseDown", nil)
+    f:SetScript("OnMouseUp", nil)
 
     -- Hide AceGUI sizer widgets completely
     if widget.sizer_se then widget.sizer_se:Hide(); widget.sizer_se:EnableMouse(false) end
@@ -383,6 +352,48 @@ local function SkinMainFrame(widget)
         SkinBackdrop(tb, 0.98)
         tb:SetBackdropBorderColor(0, 0, 0, 0)
         f.EchoesTitleBar = tb
+    end
+
+    -- Drag region: only this area moves the window ("Echoes" label zone).
+    if f.EchoesTitleBar and not f.EchoesDragRegion then
+        local dr = CreateFrame("Button", nil, f.EchoesTitleBar)
+        dr:SetFrameLevel((f.EchoesTitleBar:GetFrameLevel() or 0) + 1)
+        dr:SetPoint("LEFT", f.EchoesTitleBar, "LEFT", 6, 0)
+        -- Leave space for the lock button on the right.
+        dr:SetPoint("RIGHT", f.EchoesTitleBar, "RIGHT", -30, 0)
+        dr:SetPoint("TOP", f.EchoesTitleBar, "TOP", 0, 0)
+        dr:SetPoint("BOTTOM", f.EchoesTitleBar, "BOTTOM", 0, 0)
+        dr:EnableMouse(true)
+        dr:RegisterForDrag("LeftButton")
+
+        dr:SetScript("OnDragStart", function()
+            if Echoes_IsFrameLocked() then return end
+            if f.StartMoving then f:StartMoving() end
+        end)
+
+        dr:SetScript("OnDragStop", function()
+            if Echoes_IsFrameLocked() then return end
+            if f.StopMovingOrSizing then f:StopMovingOrSizing() end
+
+            -- Normalize anchor to TOPLEFT after moving so resizing (tab switches)
+            -- doesn't shift the top bar.
+            if f.GetLeft and f.GetTop and UIParent and f.SetPoint then
+                local left = f:GetLeft()
+                local top = f:GetTop()
+                if left and top then
+                    local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+                    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+                    if scale <= 0 then scale = 1 end
+                    if parentScale <= 0 then parentScale = 1 end
+                    local x = left * scale / parentScale
+                    local y = top * scale / parentScale
+                    f:ClearAllPoints()
+                    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+                end
+            end
+        end)
+
+        f.EchoesDragRegion = dr
     end
 
     -- Title-bar Lock button (toggles frameLocked)
@@ -759,6 +770,31 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
     local buttons = {}
     local BTN = 30
     local GAP = 6
+    local AUTO_H = 18
+    local AUTO_W = 120
+
+    local autoBtn = CreateFrame("Button", nil, f)
+    autoBtn:SetSize(AUTO_W, AUTO_H)
+    SkinBackdrop(autoBtn, 0.85)
+    autoBtn:Hide()
+    local autoText = autoBtn:CreateFontString(nil, "OVERLAY")
+    autoText:SetPoint("CENTER", autoBtn, "CENTER", 0, 0)
+    autoText:SetTextColor(0.90, 0.85, 0.70, 1)
+    SetEchoesFont(autoText, 10, ECHOES_FONT_FLAGS)
+    autoText:SetText("Autogear")
+    autoBtn._EchoesLabel = autoText
+    autoBtn:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(0.10, 0.10, 0.10, 0.95)
+    end)
+    autoBtn:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(0.06, 0.06, 0.06, 0.85)
+    end)
+    autoBtn:SetScript("OnClick", function()
+        if Echoes and Echoes.DoMaintenanceAutogear then
+            Echoes:DoMaintenanceAutogear()
+        end
+    end)
+    f._EchoesAutoGearButton = autoBtn
 
     local function MakeIconButton(i)
         local b = CreateFrame("Button", nil, f)
@@ -809,27 +845,42 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
     local function PositionButtons(count)
         count = tonumber(count) or 0
         if count < 1 then
-            f:SetSize(160, 56)
+            f:SetSize(160, 52)
             for i = 1, 4 do
                 buttons[i]:Hide()
+            end
+            if f._EchoesAutoGearButton then
+                f._EchoesAutoGearButton:Hide()
             end
             return
         end
 
-        local width = 12 + (count * BTN) + ((count - 1) * GAP) + 12
-        local height = 10 + 18 + 8 + BTN + 10
+        local iconRowWidth = (count * BTN) + ((count - 1) * GAP)
+        local width = 12 + iconRowWidth + 12
+        -- Ensure the panel is wide enough to fit the Autogear button.
+        width = math.max(width, 160)
+        -- Slightly tighter vertical padding (keep everything inside the frame).
+        local height = 10 + 18 + 6 + BTN + 6 + AUTO_H + 8
         f:SetSize(width, height)
 
-        local startX = (width - ((count * BTN) + ((count - 1) * GAP))) / 2
+        local startX = (width - iconRowWidth) / 2
         for i = 1, 4 do
             local b = buttons[i]
             b:ClearAllPoints()
             if i <= count then
-                b:SetPoint("TOPLEFT", f, "TOPLEFT", startX + ((i - 1) * (BTN + GAP)), -28)
+                b:SetPoint("TOPLEFT", f, "TOPLEFT", startX + ((i - 1) * (BTN + GAP)), -26)
                 b:Show()
             else
                 b:Hide()
             end
+        end
+
+        if f._EchoesAutoGearButton then
+            local bw = math.min(AUTO_W, width - 24)
+            f._EchoesAutoGearButton:SetWidth(bw)
+            f._EchoesAutoGearButton:ClearAllPoints()
+            f._EchoesAutoGearButton:SetPoint("TOPLEFT", f, "TOPLEFT", (width - bw) / 2, -26 - BTN - 6)
+            f._EchoesAutoGearButton:Show()
         end
     end
 
@@ -889,6 +940,9 @@ function Echoes:EnsureSpecWhisperFrame(anchorFrame)
         end
         if self._EchoesNoTargetLabel then
             SetEchoesFont(self._EchoesNoTargetLabel, 12, ECHOES_FONT_FLAGS)
+        end
+        if self._EchoesAutoGearButton and self._EchoesAutoGearButton._EchoesLabel then
+            SetEchoesFont(self._EchoesAutoGearButton._EchoesLabel, 10, ECHOES_FONT_FLAGS)
         end
         self:_EchoesUpdateForTarget()
     end)
@@ -2346,6 +2400,19 @@ function Echoes:ChatCommand(input)
 
     if cmd == "reset" then
         self:ResetMainWindowPosition()
+        return
+    end
+
+    if cmd == "spec" then
+        -- Toggle the Spec Panel. Anchor to the main window only when it's visible;
+        -- otherwise center the panel so it can't appear off-screen.
+        self:CreateMainWindow()
+        local anchor
+        local w = self.UI and self.UI.frame
+        if w and w.frame and w.IsShown and w:IsShown() then
+            anchor = w.frame
+        end
+        self:ToggleSpecWhisperFrame(anchor)
         return
     end
 
@@ -4236,66 +4303,28 @@ function Echoes:BuildGroupTab(container)
     maintBtn:SetText("Autogear")
     maintBtn:SetFullWidth(true)
     maintBtn:SetCallback("OnClick", function()
+        self:DoMaintenanceAutogear()
+    end)
+    actionCol:AddChild(maintBtn)
+    SkinButton(maintBtn)
+
+    local raidResetBtn = AceGUI:Create("Button")
+    raidResetBtn:SetText("Raid Reset")
+    raidResetBtn:SetFullWidth(true)
+    raidResetBtn:SetCallback("OnClick", function()
         local inRaid = (type(GetNumRaidMembers) == "function" and (GetNumRaidMembers() or 0) > 0)
         local inParty = (not inRaid) and (type(GetNumPartyMembers) == "function" and (GetNumPartyMembers() or 0) > 0)
         local ch = inRaid and "RAID" or (inParty and "PARTY" or nil)
 
         if not ch then
-            Echoes_Print("Maintenance: you are not in a party/raid.")
+            Echoes_Print("Raid Reset: you are not in a party/raid.")
             return
         end
-
-        if type(SendChatMessage) == "function" then
-            SendChatMessage("maintenance", ch)
-
-            -- After 2s, whisper "summon" to each party/raid member.
-            self:RunAfter(2.0, function()
-                if type(SendChatMessage) ~= "function" then return end
-                local sent = {}
-
-                if type(UnitName) == "function" then
-                    local me = Echoes_NormalizeName(UnitName("player"))
-                    if me ~= "" then sent[me:lower()] = true end
-                end
-
-                if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
-                    local n = GetNumRaidMembers() or 0
-                    if n > 0 then
-                        for i = 1, n do
-                            local rn = GetRaidRosterInfo(i)
-                            rn = Echoes_NormalizeName(rn)
-                            local key = rn:lower()
-                            if rn ~= "" and not sent[key] then
-                                sent[key] = true
-                                SendChatMessage("summon", "WHISPER", nil, rn)
-                            end
-                        end
-                        return
-                    end
-                end
-
-                if type(GetNumPartyMembers) == "function" and type(UnitName) == "function" then
-                    local nParty = GetNumPartyMembers() or 0
-                    for i = 1, math.min(4, nParty) do
-                        local pn = UnitName("party" .. i)
-                        pn = Echoes_NormalizeName(pn)
-                        local key = pn:lower()
-                        if pn ~= "" and not sent[key] then
-                            sent[key] = true
-                            SendChatMessage("summon", "WHISPER", nil, pn)
-                        end
-                    end
-                end
-            end)
-
-            -- After another 2s, send autogear.
-            self:RunAfter(4.0, function()
-                SendChatMessage("autogear", ch)
-            end)
-        end
+        if type(SendChatMessage) ~= "function" then return end
+        SendChatMessage("resetraids", ch)
     end)
-    actionCol:AddChild(maintBtn)
-    SkinButton(maintBtn)
+    actionCol:AddChild(raidResetBtn)
+    SkinButton(raidResetBtn)
 
     -- Initialize from roster once the page is built.
     self:UpdateGroupCreationFromRoster(true)
@@ -4634,6 +4663,67 @@ function Echoes:UpdateGroupCreationFromRoster(force)
     end
 end
 
+function Echoes:DoMaintenanceAutogear()
+    local inRaid = (type(GetNumRaidMembers) == "function" and (GetNumRaidMembers() or 0) > 0)
+    local inParty = (not inRaid) and (type(GetNumPartyMembers) == "function" and (GetNumPartyMembers() or 0) > 0)
+    local ch = inRaid and "RAID" or (inParty and "PARTY" or nil)
+
+    if not ch then
+        Echoes_Print("Maintenance: you are not in a party/raid.")
+        return
+    end
+
+    if type(SendChatMessage) ~= "function" then return end
+
+    SendChatMessage("maintenance", ch)
+
+    -- After 0.5s, whisper "summon" to each party/raid member.
+    self:RunAfter(0.5, function()
+        if type(SendChatMessage) ~= "function" then return end
+        local sent = {}
+
+        if type(UnitName) == "function" then
+            local me = Echoes_NormalizeName(UnitName("player"))
+            if me ~= "" then sent[me:lower()] = true end
+        end
+
+        if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
+            local n = GetNumRaidMembers() or 0
+            if n > 0 then
+                for i = 1, n do
+                    local rn = GetRaidRosterInfo(i)
+                    rn = Echoes_NormalizeName(rn)
+                    local key = rn:lower()
+                    if rn ~= "" and not sent[key] then
+                        sent[key] = true
+                        SendChatMessage("summon", "WHISPER", nil, rn)
+                    end
+                end
+                return
+            end
+        end
+
+        if type(GetNumPartyMembers) == "function" and type(UnitName) == "function" then
+            local nParty = GetNumPartyMembers() or 0
+            for i = 1, math.min(4, nParty) do
+                local pn = UnitName("party" .. i)
+                pn = Echoes_NormalizeName(pn)
+                local key = pn:lower()
+                if pn ~= "" and not sent[key] then
+                    sent[key] = true
+                    SendChatMessage("summon", "WHISPER", nil, pn)
+                end
+            end
+        end
+    end)
+
+    -- After another 0.5s, send autogear.
+    self:RunAfter(1.0, function()
+        if type(SendChatMessage) ~= "function" then return end
+        SendChatMessage("autogear", ch)
+    end)
+end
+
 -- Backwards compat: keep the old name but drive from full roster now.
 function Echoes:UpdateGroupCreationPlayerSlot(force)
     self:UpdateGroupCreationFromRoster(force)
@@ -4690,13 +4780,11 @@ local function MinimapButton_UpdatePosition()
 
     local angle  = tonumber(EchoesDB.minimapAngle) or 220
     local radius = 80
-
-    local mx, my = Minimap:GetCenter()
-    local bx = mx + radius * math.cos(math.rad(angle))
-    local by = my + radius * math.sin(math.rad(angle))
+    local bx = radius * math.cos(math.rad(angle))
+    local by = radius * math.sin(math.rad(angle))
 
     MinimapBtn:ClearAllPoints()
-    MinimapBtn:SetPoint("CENTER", UIParent, "BOTTOMLEFT", bx, by)
+    MinimapBtn:SetPoint("CENTER", Minimap, "CENTER", bx, by)
 end
 
 local function MinimapButton_OnDragUpdate()
@@ -4721,13 +4809,31 @@ function Echoes:BuildMinimapButton()
     b:SetFrameStrata("MEDIUM")
     b:SetFrameLevel(8)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    b:RegisterForDrag("RightButton")
+    b:RegisterForDrag("LeftButton", "RightButton")
     b:SetHighlightTexture(nil)
+
+    -- Circular minimap-style button with a visible background color.
+    -- We use Blizzard's tracking background as the alpha shape, tinted dark blue.
+    local fill = b:CreateTexture(nil, "BACKGROUND")
+    fill:SetTexture("Interface\\Minimap\\MiniMap-TrackingBackground")
+    fill:SetSize(54, 54)
+    fill:SetPoint("CENTER", b, "CENTER", 10, -12)
+    fill:SetVertexColor(0.06, 0.10, 0.26, 1.0)
+    b._EchoesFill = fill
+
+    -- Optional subtle texture layer (same circular shape, low alpha)
+    local bg = b:CreateTexture(nil, "BORDER")
+    bg:SetTexture("Interface\\Minimap\\MiniMap-TrackingBackground")
+    bg:SetSize(54, 54)
+    bg:SetPoint("CENTER", b, "CENTER", 10, -12)
+    bg:SetVertexColor(0.18, 0.22, 0.35, 0.20)
+    b._EchoesBG = bg
 
     local border = b:CreateTexture(nil, "ARTWORK")
     border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
     border:SetSize(54, 54)
     border:SetPoint("CENTER", b, "CENTER", 10, -12)
+    b._EchoesBorder = border
 
     local label = b:CreateFontString(nil, "OVERLAY")
     label:SetPoint("CENTER", b, "CENTER", 0, 0)
@@ -4737,7 +4843,7 @@ function Echoes:BuildMinimapButton()
 
     b:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Echoes\n|cffAAAAAALeft-click: Toggle window\nRight-drag: Move|r")
+        GameTooltip:SetText("Echoes\n|cffAAAAAALeft-click: Toggle window\nRight-drag: Move\nCtrl+Click to reset position.|r")
         GameTooltip:Show()
     end)
 
@@ -4746,6 +4852,10 @@ function Echoes:BuildMinimapButton()
     end)
 
     b:SetScript("OnClick", function(self, button)
+        if type(IsControlKeyDown) == "function" and IsControlKeyDown() then
+            Echoes:ResetMainWindowPosition()
+            return
+        end
         if button == "LeftButton" then
             Echoes:ToggleMainWindow()
         end
