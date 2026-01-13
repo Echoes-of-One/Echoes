@@ -250,7 +250,9 @@ local function SkinMainFrame(widget)
     -- Movable, NO sizing
     f:SetMovable(true)
     f:EnableMouse(true)
-    f:SetClampedToScreen(true)
+    -- Allow the window to extend beyond the screen when resized (tab size changes).
+    -- Clamping forces WoW to push the frame inward as it grows.
+    f:SetClampedToScreen(false)
     f:SetResizable(true)
     local w, h = f:GetWidth(), f:GetHeight()
     f:SetMinResize(w, h)
