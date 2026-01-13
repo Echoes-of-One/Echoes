@@ -197,6 +197,31 @@ local function SkinMainFrame(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
 
+    local function Echoes_UISpecialFrames_Add(frame)
+        if not frame or type(frame.GetName) ~= "function" then return end
+        if type(UISpecialFrames) ~= "table" then return end
+        local name = frame:GetName()
+        if not name or name == "" then return end
+        for i = 1, #UISpecialFrames do
+            if UISpecialFrames[i] == name then
+                return
+            end
+        end
+        table.insert(UISpecialFrames, name)
+    end
+
+    local function Echoes_UISpecialFrames_Remove(frame)
+        if not frame or type(frame.GetName) ~= "function" then return end
+        if type(UISpecialFrames) ~= "table" then return end
+        local name = frame:GetName()
+        if not name or name == "" then return end
+        for i = #UISpecialFrames, 1, -1 do
+            if UISpecialFrames[i] == name then
+                table.remove(UISpecialFrames, i)
+            end
+        end
+    end
+
     local function Echoes_SetLockButtonVisual(btn, locked)
         if not btn then return end
 
@@ -245,6 +270,30 @@ local function SkinMainFrame(widget)
         f._EchoesAnchored = true
         f:ClearAllPoints()
         f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 400, -200)
+    end
+
+    -- Keep Echoes underneath default Blizzard UI panels (bags, game menu).
+    -- AceGUI frames often default to "DIALOG"; drop to a lower strata.
+    if f.SetFrameStrata then
+        f:SetFrameStrata("LOW")
+    end
+    if f.SetFrameLevel then
+        f:SetFrameLevel(10)
+    end
+
+    -- Allow Escape to close/minimize Echoes when it's the topmost active panel.
+    -- We manage this dynamically so we don't pollute UISpecialFrames when hidden.
+    if not f._EchoesUISpecialManaged and f.HookScript then
+        f._EchoesUISpecialManaged = true
+        f:HookScript("OnShow", function(self)
+            Echoes_UISpecialFrames_Add(self)
+        end)
+        f:HookScript("OnHide", function(self)
+            Echoes_UISpecialFrames_Remove(self)
+        end)
+        if f.IsShown and f:IsShown() then
+            Echoes_UISpecialFrames_Add(f)
+        end
     end
 
     -- Movable, NO sizing
