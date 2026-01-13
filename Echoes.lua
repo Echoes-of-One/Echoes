@@ -2345,7 +2345,7 @@ function Echoes:CreateMainWindow()
     end
 
     local frame = AceGUI:Create("Frame")
-    frame:SetTitle("Echoes v0.1")
+    frame:SetTitle("Echoes v0.11")
     frame:SetLayout("List")
     frame:SetWidth(FRAME_SIZES.BOT.w)
     frame:SetHeight(FRAME_SIZES.BOT.h)
