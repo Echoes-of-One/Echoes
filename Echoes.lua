@@ -123,7 +123,7 @@ end
 
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 local FRAME_SIZES = {
-    BOT    = { w = 320, h = 470 },
+    BOT    = { w = 320, h = 480 },
     -- Wide enough for the 3-column grid + Name button, but not overly tall.
     GROUP  = { w = 740, h = 440 },
     ECHOES = { w = 320, h = 360 },
@@ -929,6 +929,7 @@ end
 local function SkinButton(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
+    local fontSize = (tonumber(widget._EchoesFontSize) or tonumber(f._EchoesFontSize) or 10)
 
     -- AceGUI often uses Blizzard templates with multiple texture regions; strip all of them.
     StripFrameTextures(f)
@@ -943,7 +944,7 @@ local function SkinButton(widget)
             local fs = self.GetFontString and self:GetFontString()
             if fs then
                 fs:SetTextColor(0.90, 0.85, 0.70, 1)
-                SetEchoesFont(fs, 10, ECHOES_FONT_FLAGS)
+                SetEchoesFont(fs, tonumber(self._EchoesFontSize) or 10, ECHOES_FONT_FLAGS)
             end
         end)
         f:HookScript("OnMouseDown", function(self)
@@ -969,6 +970,7 @@ local function SkinButton(widget)
         end)
     end
     f._EchoesSkinAlpha = 0.7
+    f._EchoesFontSize = fontSize
 
     SkinBackdrop(f, 0.7)
 
@@ -981,7 +983,7 @@ local function SkinButton(widget)
 
     if widget.text and widget.text.SetTextColor then
         widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- gold-ish
-        SetEchoesFont(widget.text, 10, ECHOES_FONT_FLAGS)
+        SetEchoesFont(widget.text, fontSize, ECHOES_FONT_FLAGS)
     end
 end
 
@@ -1659,6 +1661,10 @@ local CMD = {
     DPS_ATTACK  = ".bot dps attack",
 
     SUMMON      = "summon",
+    TANK_SUMMON   = "@tank summon",
+    MELEE_SUMMON  = "@melee summon",
+    RANGED_SUMMON = "@ranged summon",
+    HEAL_SUMMON   = "@heal summon",
     RELEASE     = "release",
     LEVEL_UP    = ".playerbots bot init=epic",
     DRINK       = "drink",
@@ -2246,6 +2252,58 @@ function Echoes:ToggleMainWindow()
     end
 end
 
+local function Echoes_Trim(s)
+    s = tostring(s or "")
+    return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+function Echoes:ResetMainWindowPosition()
+    self:CreateMainWindow()
+
+    local widget = self.UI.frame
+    local f = widget and widget.frame
+    if not f or not f.SetPoint then return end
+
+    -- First anchor to CENTER for the user's expectation.
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+
+    -- Then normalize to TOPLEFT so tab size changes don't shift the top bar.
+    if f.GetLeft and f.GetTop and UIParent then
+        local left = f:GetLeft()
+        local top = f:GetTop()
+        if left and top then
+            local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+            local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+            if scale <= 0 then scale = 1 end
+            if parentScale <= 0 then parentScale = 1 end
+
+            local x = left * scale / parentScale
+            local y = top * scale / parentScale
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+        end
+    end
+
+    widget:Show()
+    self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
+    Echoes_Print("Window reset to center.")
+end
+
+function Echoes:ChatCommand(input)
+    input = Echoes_Trim(input)
+    local cmd = input:match("^(%S+)")
+    cmd = cmd and cmd:lower() or ""
+
+    if cmd == "reset" then
+        self:ResetMainWindowPosition()
+        return
+    end
+
+    -- Default behavior: toggle window
+    self:ToggleMainWindow()
+end
+
 ------------------------------------------------------------
 -- Bot Control tab
 ------------------------------------------------------------
@@ -2256,7 +2314,11 @@ function Echoes:BuildBotTab(container)
 
     local ROW_H = 26
     local LABEL_H = 14
-    local GAP_H = 10
+    -- Keep gaps very small so nothing spills outside the frame (WoW doesn't clip children).
+    local GAP_H = 0
+    -- Role matrix is the lowest section; keep it slightly more compact.
+    local ROLE_ROW_H = 24
+    local ROLE_HDR_H = 18
 
     ------------------------------------------------
     -- 1) Class row: dropdown (40%) + spacer + < >
@@ -2555,7 +2617,7 @@ function Echoes:BuildBotTab(container)
     mSpacerR:SetLayout("Flow")
     moveGroup:AddChild(mSpacerR)
 
-    moveGroup:SetHeight(ROW_H + 4)
+    moveGroup:SetHeight(ROW_H + 2)
 
     -- Extra vertical spacing between global movement buttons and the role matrix
     -- (Empty SimpleGroups can collapse in AceGUI Flow layout; use a Label spacer instead.)
@@ -2569,22 +2631,53 @@ function Echoes:BuildBotTab(container)
     -- 5) Role Matrix: label + 4 buttons filling the row
     ------------------------------------------------
     local rows = {
-        { label = "Tank",   a="TANK_ATTACK", s="TANK_STAY",   f="TANK_FOLLOW",   fl="TANK_FLEE"   },
-        { label = "Melee",  a="MELEE_ATK",   s="MELEE_STAY",  f="MELEE_FOLLOW",  fl="MELEE_FLEE"  },
-        { label = "Ranged", a="RANGED_ATK",  s="RANGED_STAY", f="RANGED_FOLLOW", fl="RANGED_FLEE" },
-        { label = "Healer", a="HEAL_ATTACK", s="HEAL_STAY",   f="HEAL_FOLLOW",   fl="HEAL_FLEE"   },
+        { label = "Tank",   su = "TANK_SUMMON",   a="TANK_ATTACK", s="TANK_STAY",   f="TANK_FOLLOW",   fl="TANK_FLEE"   },
+        { label = "Melee",  su = "MELEE_SUMMON",  a="MELEE_ATK",   s="MELEE_STAY",  f="MELEE_FOLLOW",  fl="MELEE_FLEE"  },
+        { label = "Ranged", su = "RANGED_SUMMON", a="RANGED_ATK",  s="RANGED_STAY", f="RANGED_FOLLOW", fl="RANGED_FLEE" },
+        { label = "Healer", su = "HEAL_SUMMON",   a="HEAL_ATTACK", s="HEAL_STAY",   f="HEAL_FOLLOW",   fl="HEAL_FLEE"   },
     }
 
-    for _, row in ipairs(rows) do
-        local lab = AceGUI:Create("Label")
-        lab:SetText(row.label)
-        lab:SetFullWidth(true)
-        if lab.label and lab.label.SetJustifyH then
-            lab.label:SetJustifyH("CENTER")
+    for i, row in ipairs(rows) do
+        -- Role header: keep the label and Summon button close together and inside the frame.
+        local header = AceGUI:Create("SimpleGroup")
+        header:SetFullWidth(true)
+        header:SetLayout("None")
+        if header.SetAutoAdjustHeight then header:SetAutoAdjustHeight(false) end
+        header:SetHeight(ROLE_HDR_H)
+        container:AddChild(header)
+        SkinSimpleGroup(header)
+        if header.frame and header.frame.SetBackdropBorderColor then
+            header.frame:SetBackdropBorderColor(0, 0, 0, 0)
         end
-        container:AddChild(lab)
-        SkinLabel(lab)
-        lab:SetHeight(LABEL_H)
+
+        local summonBtn = AceGUI:Create("Button")
+        summonBtn:SetText("Summon")
+        summonBtn:SetWidth(90)
+        summonBtn:SetHeight(ROLE_HDR_H)
+        summonBtn:SetCallback("OnClick", function() SendCmdKey(row.su) end)
+        header:AddChild(summonBtn)
+        SkinButton(summonBtn)
+
+        if summonBtn.frame and header.frame then
+            summonBtn.frame:ClearAllPoints()
+            -- Keep summon X position consistent across rows and split the row at center.
+            summonBtn.frame:SetPoint("LEFT", header.frame, "CENTER", 10, 0)
+            summonBtn.frame:SetPoint("TOP", header.frame, "TOP", 0, 0)
+            summonBtn.frame:SetPoint("BOTTOM", header.frame, "BOTTOM", 0, 0)
+        end
+
+        if header.frame and header.frame.CreateFontString then
+            local fs = header.frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            fs:SetText(row.label)
+            -- Center within the left half of the header.
+            fs:SetJustifyH("CENTER")
+            fs:SetJustifyV("MIDDLE")
+            fs:SetPoint("LEFT", header.frame, "LEFT", 10, 0)
+            fs:SetPoint("RIGHT", header.frame, "CENTER", -10, 0)
+            if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
+            SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
+            header._EchoesRoleHeaderFS = fs
+        end
 
         local rowGroup = AceGUI:Create("SimpleGroup")
         rowGroup:SetFullWidth(true)
@@ -2592,15 +2685,17 @@ function Echoes:BuildBotTab(container)
         container:AddChild(rowGroup)
 
         local rowSpacerL = AceGUI:Create("SimpleGroup")
-        rowSpacerL:SetRelativeWidth(0.02)
+        rowSpacerL:SetRelativeWidth(0.06)
         rowSpacerL:SetLayout("Flow")
         rowGroup:AddChild(rowSpacerL)
 
         local function AddRoleButton(text, key)
             local b = AceGUI:Create("Button")
             b:SetText(text)
-            b:SetRelativeWidth(0.24) -- 4 * 0.24 + 2*0.02 = 1.0
-            b:SetHeight(ROW_H)
+            b:SetRelativeWidth(0.22) -- 2*0.06 + 4*0.22 = 1.0
+            b:SetHeight(ROLE_ROW_H)
+            -- Slightly smaller so labels don't truncate.
+            b._EchoesFontSize = 9
             b:SetCallback("OnClick", function() SendCmdKey(key) end)
             rowGroup:AddChild(b)
             SkinButton(b)
@@ -2612,11 +2707,11 @@ function Echoes:BuildBotTab(container)
         AddRoleButton("Flee",   row.fl)
 
         local rowSpacerR = AceGUI:Create("SimpleGroup")
-        rowSpacerR:SetRelativeWidth(0.02)
+        rowSpacerR:SetRelativeWidth(0.06)
         rowSpacerR:SetLayout("Flow")
         rowGroup:AddChild(rowSpacerR)
 
-        rowGroup:SetHeight(ROW_H + 2)
+        rowGroup:SetHeight(ROLE_ROW_H + 2)
     end
 end
 
@@ -4624,8 +4719,8 @@ end
 ------------------------------------------------------------
 function Echoes:OnInitialize()
     EnsureDefaults()
-    self:RegisterChatCommand("echoes", "ToggleMainWindow")
-    self:RegisterChatCommand("ech",    "ToggleMainWindow")
+    self:RegisterChatCommand("echoes", "ChatCommand")
+    self:RegisterChatCommand("ech",    "ChatCommand")
 end
 
 function Echoes:OnEnable()
