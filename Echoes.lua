@@ -145,9 +145,117 @@ local ECHOES_BACKDROP = {
 local ECHOES_FONT_PATH = "Fonts\\FRIZQT__.TTF"
 local ECHOES_FONT_FLAGS = "OUTLINE"
 
+-- Private FontObjects (unique names) so we never depend on Blizzard shared FontObjects.
+-- This prevents many skin packs from "hijacking" our fonts by swapping GameFontNormal, etc.
+local ECHOES_FONT_OBJECTS = {}
+
+local function Echoes_SanitizeFontFlags(flags)
+    flags = tostring(flags or "")
+    flags = flags:gsub("%s+", " ")
+    flags = flags:gsub("^%s+", "")
+    flags = flags:gsub("%s+$", "")
+    if flags == "" then
+        flags = ECHOES_FONT_FLAGS
+    end
+    return flags
+end
+
+local function Echoes_GetFontObject(size, flags)
+    local s = tonumber(size) or 12
+    local f = Echoes_SanitizeFontFlags(flags)
+    local key = tostring(s) .. "|" .. f
+    local fo = ECHOES_FONT_OBJECTS[key]
+    if fo then return fo end
+
+    if type(CreateFont) ~= "function" then
+        return nil
+    end
+
+    -- Build a stable unique global name. (CreateFont registers globally by name.)
+    local name = ("EchoesFont_%d_%s"):format(s, f:gsub("[^%w]", "_"))
+    fo = CreateFont(name)
+    if fo and fo.SetFont then
+        fo:SetFont(ECHOES_FONT_PATH, s, f)
+    end
+    ECHOES_FONT_OBJECTS[key] = fo
+    return fo
+end
+
 local function SetEchoesFont(fontString, size, flags)
-    if not fontString or not fontString.SetFont then return end
-    fontString:SetFont(ECHOES_FONT_PATH, tonumber(size) or 12, flags or ECHOES_FONT_FLAGS)
+    if not fontString then return end
+    local s = tonumber(size) or 12
+    local f = Echoes_SanitizeFontFlags(flags)
+
+    -- Prefer FontObjects for isolation (most hijacks target shared FontObjects).
+    if fontString.SetFontObject then
+        local fo = Echoes_GetFontObject(s, f)
+        if fo then
+            fontString:SetFontObject(fo)
+            return
+        end
+    end
+
+    -- Fallback for objects that don't support SetFontObject.
+    if fontString.SetFont then
+        fontString:SetFont(ECHOES_FONT_PATH, s, f)
+    end
+end
+
+-- Re-assert Echoes font via a private FontObject on a single FontString.
+-- Preserves size/flags; only ensures it uses our face/object.
+local function Echoes_ForceFontOnFontString(fs)
+    if not fs or not fs.GetFont then return end
+    local _, curSize, curFlags = fs:GetFont()
+    SetEchoesFont(fs, tonumber(curSize) or 12, curFlags or ECHOES_FONT_FLAGS)
+end
+
+-- Global dropdown menu guard (scoped): only affects menus opened by Echoes-owned dropdowns.
+-- This protects BOTH the selected-value text and the popup list item text from late skin passes.
+local function Echoes_InstallDropdownFontGuards()
+    if _G._EchoesDropdownFontGuardsInstalled then return end
+    _G._EchoesDropdownFontGuardsInstalled = true
+
+    -- Reapply the font face to popup menu buttons as they are added.
+    if type(hooksecurefunc) == "function" and type(UIDropDownMenu_AddButton) == "function" then
+        hooksecurefunc("UIDropDownMenu_AddButton", function(info, level)
+            local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU")
+            if not openMenu or not openMenu._EchoesOwned then return end
+
+            local lvl = tonumber(level) or rawget(_G, "UIDROPDOWNMENU_MENU_LEVEL") or 1
+            local listFrame = rawget(_G, "DropDownList" .. tostring(lvl))
+            if not listFrame or not listFrame.numButtons then return end
+
+            local idx = tonumber(listFrame.numButtons)
+            if not idx or idx < 1 then return end
+
+            local btn = rawget(_G, "DropDownList" .. tostring(lvl) .. "Button" .. tostring(idx))
+            if not btn then return end
+
+            local fs = (btn.GetFontString and btn:GetFontString()) or rawget(_G, btn:GetName() .. "NormalText")
+            Echoes_ForceFontOnFontString(fs)
+        end)
+    end
+
+    -- Also reassert when a dropdown list frame shows (covers cases where another addon
+    -- changes fonts after button creation).
+    for lvl = 1, 3 do
+        local listFrame = rawget(_G, "DropDownList" .. tostring(lvl))
+        if listFrame and listFrame.HookScript and not listFrame._EchoesFontGuardHooked then
+            listFrame._EchoesFontGuardHooked = true
+            listFrame:HookScript("OnShow", function(self)
+                local openMenu = rawget(_G, "UIDROPDOWNMENU_OPEN_MENU")
+                if not openMenu or not openMenu._EchoesOwned then return end
+                local n = tonumber(self.numButtons) or 0
+                for i = 1, n do
+                    local btn = rawget(_G, self:GetName() .. "Button" .. tostring(i))
+                    if btn then
+                        local fs = (btn.GetFontString and btn:GetFontString()) or rawget(_G, btn:GetName() .. "NormalText")
+                        Echoes_ForceFontOnFontString(fs)
+                    end
+                end
+            end)
+        end
+    end
 end
 
 -- Re-assert Echoes font face on any FontStrings under a given frame.
@@ -159,14 +267,10 @@ local function Echoes_ForceFontFaceOnFrame(rootFrame)
     local visited = {}
 
     local function ApplyFontString(fs)
-        if not fs or not fs.GetFont or not fs.SetFont then return end
-        local curPath, curSize, curFlags = fs:GetFont()
-        local size = tonumber(curSize) or 12
-        local flags = curFlags or ECHOES_FONT_FLAGS
-        -- Only change the face; keep size/flags.
-        if curPath ~= ECHOES_FONT_PATH then
-            fs:SetFont(ECHOES_FONT_PATH, size, flags)
-        end
+        if not fs or not fs.GetFont then return end
+        -- Use private FontObjects; preserve size/flags.
+        local _, curSize, curFlags = fs:GetFont()
+        SetEchoesFont(fs, tonumber(curSize) or 12, curFlags or ECHOES_FONT_FLAGS)
     end
 
     local function Walk(frame)
@@ -438,6 +542,11 @@ local function SkinMainFrame(widget)
                     f:ClearAllPoints()
                     f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
                 end
+            end
+
+            -- Prevent the window from being dropped fully off-screen.
+            if Echoes and Echoes.NormalizeAndClampMainWindowToScreen then
+                Echoes:NormalizeAndClampMainWindowToScreen()
             end
         end)
 
@@ -1508,6 +1617,9 @@ local function SkinDropdown(widget)
     if not widget or not widget.frame then return end
     local f = widget.frame
 
+    -- Ensure global (scoped) dropdown menu font guards are installed.
+    Echoes_InstallDropdownFontGuards()
+
     local function StripColorCodes(s)
         if type(s) ~= "string" then return s end
         s = s:gsub("|c%x%x%x%x%x%x%x%x", "")
@@ -1655,6 +1767,34 @@ local function SkinDropdown(widget)
         sepTex = box._EchoesDropSep
     end
 
+    local function ReapplyEchoesDropdownFont()
+        if widget.text and widget.text.SetTextColor then
+            widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- match buttons
+        end
+        if widget.text then
+            SetEchoesFont(widget.text, 10, ECHOES_FONT_FLAGS)
+        end
+        ApplyEchoesGroupSlotSelectedColor()
+    end
+
+    -- Reassert after value changes (selection from popup). This is the main point
+    -- where other skins can swap FontObjects after we set them.
+    if not widget._EchoesSetValueHooked and type(widget.SetValue) == "function" then
+        widget._EchoesSetValueHooked = true
+        if type(hooksecurefunc) == "function" then
+            hooksecurefunc(widget, "SetValue", function()
+                ReapplyEchoesDropdownFont()
+            end)
+        else
+            local orig = widget.SetValue
+            widget.SetValue = function(self, ...)
+                local r = orig(self, ...)
+                ReapplyEchoesDropdownFont()
+                return r
+            end
+        end
+    end
+
     -- Re-anchor the displayed value text inside the skinned box
     if widget.text and widget.text.ClearAllPoints and widget.text.SetPoint then
         widget.text:ClearAllPoints()
@@ -1669,10 +1809,19 @@ local function SkinDropdown(widget)
         if widget.text.SetJustifyH then
             widget.text:SetJustifyH("LEFT")
         end
-        if widget.text.SetTextColor then
-            widget.text:SetTextColor(0.90, 0.85, 0.70, 1) -- match buttons
-        end
-        SetEchoesFont(widget.text, 10, ECHOES_FONT_FLAGS)
+        ReapplyEchoesDropdownFont()
+    end
+
+    -- Some UI packs re-apply shared FontObjects after we skin the dropdown, which
+    -- can "hijack" the visible selected-value font. Reassert on show and on click.
+    if box and box.HookScript and not box._EchoesFontReassertHooked then
+        box._EchoesFontReassertHooked = true
+        box:HookScript("OnShow", function()
+            ReapplyEchoesDropdownFont()
+        end)
+        box:HookScript("OnMouseDown", function()
+            ReapplyEchoesDropdownFont()
+        end)
     end
 
     -- Apply class colors to group-slot dropdowns (Echoes-only)
@@ -1751,6 +1900,78 @@ local function Clamp(v, minv, maxv)
     if v < minv then return minv end
     if v > maxv then return maxv end
     return v
+end
+
+-- Normalize the main window anchor to TOPLEFT and keep it on-screen.
+-- WoW frames don't clip children and can be dragged off-screen; scaling can also
+-- push the window out of view. This helper prevents the addon from becoming
+-- unreachable without requiring /echoes reset.
+function Echoes:NormalizeAndClampMainWindowToScreen()
+    local widget = self.UI and self.UI.frame
+    local f = widget and widget.frame
+    if not f or not UIParent then return end
+
+    -- Clamp to screen bounds (in UIParent coordinate space) WITHOUT constantly re-anchoring.
+    -- This prevents annoying "repositioning" during tab resizes, but still guarantees the
+    -- window can always be recovered if it ends up off-screen.
+    if not (f.GetLeft and f.GetTop and f.GetWidth and f.GetHeight and f.SetPoint and f.ClearAllPoints) then
+        return
+    end
+
+    local parentW = (UIParent.GetWidth and UIParent:GetWidth()) or (GetScreenWidth and GetScreenWidth())
+    local parentH = (UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight())
+    if not parentW or not parentH then return end
+
+    local left = f:GetLeft()
+    local top = f:GetTop()
+    if not left or not top then return end
+
+    local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    if scale <= 0 then scale = 1 end
+    if parentScale <= 0 then parentScale = 1 end
+
+    -- Convert current position into UIParent coordinate space.
+    local x = left * scale / parentScale
+    local y = top * scale / parentScale
+
+    -- Convert current size into UIParent coordinate space.
+    local w = (f:GetWidth() or 0) * (scale / parentScale)
+    local h = (f:GetHeight() or 0) * (scale / parentScale)
+
+    -- Keep a margin so the title bar (TOPLEFT) remains reachable.
+    local margin = 24
+
+    if w <= 0 or h <= 0 then
+        -- Fall back to a sane default.
+        f:ClearAllPoints()
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        return
+    end
+
+    local right = x + w
+    local bottom = y - h
+
+    -- Only move the window if it's actually off-screen (or nearly so).
+    local offscreen = false
+    if x < margin or y > (parentH - margin) or right < margin or bottom > (parentH - margin) then
+        offscreen = true
+    end
+    if x > (parentW - margin) or y < margin or right > (parentW + w - margin) or bottom < (-h + margin) then
+        offscreen = true
+    end
+
+    if not offscreen then
+        return
+    end
+
+    -- Clamp the TOPLEFT corner into the visible screen bounds. This guarantees recovery
+    -- even if the window is larger than the screen.
+    x = Clamp(x, margin, parentW - margin)
+    y = Clamp(y, margin, parentH - margin)
+
+    f:ClearAllPoints()
+    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
 end
 
 local function Echoes_GetPlayerSpecLabel(classFile)
@@ -2196,28 +2417,6 @@ function Echoes:ApplyFrameSizeForTab(key)
     if not frame then return end
     local s = FRAME_SIZES[key] or FRAME_SIZES["BOT"]
 
-    -- Keep the window anchored by its TOPLEFT so changing tab sizes does not make
-    -- the tab buttons "jump" around (CENTER-anchored resizing moves the top edge).
-    local function NormalizeToTopLeft()
-        local f = frame.frame
-        if not f or not f.GetLeft or not f.GetTop or not f.SetPoint then return end
-        local left = f:GetLeft()
-        local top = f:GetTop()
-        if not left or not top or not UIParent then return end
-
-        local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-        local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-        if scale <= 0 then scale = 1 end
-        if parentScale <= 0 then parentScale = 1 end
-
-        local x = left * scale / parentScale
-        local y = top * scale / parentScale
-        f:ClearAllPoints()
-        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-    end
-
-    NormalizeToTopLeft()
-
     -- Constrain to available screen space, accounting for addon UI scale.
     -- This keeps the window usable across different resolutions.
     local scale = EchoesDB.uiScale or 1.0
@@ -2243,8 +2442,8 @@ function Echoes:ApplyFrameSizeForTab(key)
     frame:SetWidth(math.floor(w + 0.5))
     frame:SetHeight(math.floor(h + 0.5))
 
-    -- Some AceGUI versions reassert points during sizing; normalize again.
-    NormalizeToTopLeft()
+    -- If the new size would push the window off-screen, gently clamp it back.
+    self:NormalizeAndClampMainWindowToScreen()
 end
 
 function Echoes:ApplyScale()
@@ -2255,6 +2454,9 @@ function Echoes:ApplyScale()
 
     -- Re-apply sizing after scale changes so the current tab still fits.
     self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
+
+    -- Scaling can move the window off-screen; keep it reachable.
+    self:NormalizeAndClampMainWindowToScreen()
 end
 
 
@@ -2404,6 +2606,7 @@ function Echoes:ToggleMainWindow()
         f:Hide()
     else
         f:Show()
+        self:NormalizeAndClampMainWindowToScreen()
     end
 end
 
@@ -2419,29 +2622,16 @@ function Echoes:ResetMainWindowPosition()
     local f = widget and widget.frame
     if not f or not f.SetPoint then return end
 
-    -- First anchor to CENTER for the user's expectation.
+    widget:Show()
+
+    -- Apply current scale + tab size first so we can accurately center.
+    self:ApplyScale()
+    self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
+
+    -- Center the window, then clamp as a safety net.
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-
-    -- Then normalize to TOPLEFT so tab size changes don't shift the top bar.
-    if f.GetLeft and f.GetTop and UIParent then
-        local left = f:GetLeft()
-        local top = f:GetTop()
-        if left and top then
-            local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-            local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-            if scale <= 0 then scale = 1 end
-            if parentScale <= 0 then parentScale = 1 end
-
-            local x = left * scale / parentScale
-            local y = top * scale / parentScale
-            f:ClearAllPoints()
-            f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-        end
-    end
-
-    widget:Show()
-    self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
+    self:NormalizeAndClampMainWindowToScreen()
     Echoes_Print("Window reset to center.")
 end
 
@@ -2449,6 +2639,25 @@ function Echoes:ChatCommand(input)
     input = Echoes_Trim(input)
     local cmd = input:match("^(%S+)")
     cmd = cmd and cmd:lower() or ""
+
+    if cmd == "scale" then
+        local arg = input:match("^%S+%s+(.+)$")
+        local v = tonumber(arg)
+        if not v then
+            Echoes_Print("Usage: /echoes scale <0.5-2.0>")
+            return
+        end
+        v = Clamp(v, 0.5, 2.0)
+        EchoesDB.uiScale = v
+        self:CreateMainWindow()
+        self:ApplyScale()
+        -- If the slider exists (Echoes tab has been opened), keep it in sync.
+        if self.UI and self.UI.scaleSlider and self.UI.scaleSlider.SetValue then
+            self.UI.scaleSlider:SetValue(v)
+        end
+        Echoes_Print("UI scale set to " .. string.format("%.2f", v))
+        return
+    end
 
     if cmd == "reset" then
         self:ResetMainWindowPosition()
@@ -2472,418 +2681,29 @@ function Echoes:ChatCommand(input)
     self:ToggleMainWindow()
 end
 
-------------------------------------------------------------
--- Bot Control tab
-------------------------------------------------------------
-function Echoes:BuildBotTab(container)
-    -- Use Flow instead of List to avoid oversized vertical gaps between rows in some AceGUI builds
-    -- (List layout can over-allocate spacing depending on widget heights and fontstring metrics on 3.3.5)
-    container:SetLayout("Flow")
+-- Expose commonly-used helpers for tab modules (loaded via .toc after this file).
+-- This allows splitting the addon into multiple files without relying on cross-file locals.
+Echoes.t_unpack = t_unpack
+Echoes.Clamp = Clamp
+Echoes.Print = Echoes_Print
+Echoes.SetEchoesFont = SetEchoesFont
+Echoes.ECHOES_FONT_FLAGS = ECHOES_FONT_FLAGS
+Echoes.SkinMainFrame = SkinMainFrame
+Echoes.SkinSimpleGroup = SkinSimpleGroup
+Echoes.SkinButton = SkinButton
+Echoes.SkinDropdown = SkinDropdown
+Echoes.SkinEditBox = SkinEditBox
+Echoes.SkinHeading = SkinHeading
+Echoes.SkinLabel = SkinLabel
+Echoes.SkinTabButton = SkinTabButton
+Echoes.SendCmdKey = SendCmdKey
+Echoes.GetSelectedClass = GetSelectedClass
+Echoes.IsNameInGroup = Echoes_IsNameInGroup
+Echoes.CLASSES = CLASSES
+Echoes.GROUP_TEMPLATES = GROUP_TEMPLATES
+Echoes.GetCycleValuesForRightText = GetCycleValuesForRightText
 
-    local ROW_H = 26
-    local LABEL_H = 14
-    -- Keep gaps very small so nothing spills outside the frame (WoW doesn't clip children).
-    local GAP_H = 0
-    -- Role matrix is the lowest section; keep it slightly more compact.
-    local ROLE_ROW_H = 24
-    local ROLE_HDR_H = 18
-
-    ------------------------------------------------
-    -- 1) Class row: dropdown (40%) + spacer + < >
-    ------------------------------------------------
-    local classGroup = AceGUI:Create("SimpleGroup")
-    classGroup:SetFullWidth(true)
-    classGroup:SetLayout("None")
-    if classGroup.SetAutoAdjustHeight then classGroup:SetAutoAdjustHeight(false) end
-    classGroup:SetHeight(ROW_H)
-    container:AddChild(classGroup)
-
-    -- Inline "Class" label
-    -- NOTE: AceGUI "Label" anchors its FontString to TOPLEFT (justifyV=TOP),
-    -- so it appears vertically misaligned next to a full-height Dropdown.
-    -- Use a SimpleGroup + manually centered FontString instead.
-    local classLabel = AceGUI:Create("SimpleGroup")
-    classLabel:SetWidth(50)
-    classLabel:SetHeight(ROW_H)
-    classLabel:SetLayout("Fill")
-    classGroup:AddChild(classLabel)
-    SkinSimpleGroup(classLabel)
-    if classLabel.frame and classLabel.frame.SetBackdrop then
-        -- Match other inline rows: label should be visually "flat".
-        classLabel.frame:SetBackdropBorderColor(0, 0, 0, 0)
-    end
-    if classLabel.frame and classLabel.frame.CreateFontString then
-        local fs = classLabel.frame:CreateFontString(nil, "OVERLAY")
-        -- WoW 3.3.5 throws "Font not set" if SetText runs before SetFont.
-        SetEchoesFont(fs, 11, ECHOES_FONT_FLAGS)
-        fs:SetText("Class")
-        fs:SetJustifyH("LEFT")
-        fs:SetJustifyV("MIDDLE")
-        fs:SetPoint("LEFT", classLabel.frame, "LEFT", 0, 0)
-        fs:SetPoint("RIGHT", classLabel.frame, "RIGHT", 0, 0)
-        fs:SetPoint("TOP", classLabel.frame, "TOP", 0, 0)
-        fs:SetPoint("BOTTOM", classLabel.frame, "BOTTOM", 0, 0)
-        if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
-        classLabel._EchoesFontString = fs
-    end
-
-    if classLabel.frame and classGroup.frame then
-        classLabel.frame:ClearAllPoints()
-        classLabel.frame:SetPoint("LEFT", classGroup.frame, "LEFT", 10, 0)
-        classLabel.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        classLabel.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-    end
-
-
-    local classValues = {}
-    for i, c in ipairs(CLASSES) do
-        classValues[i] = c.label
-    end
-
-    local classDrop = AceGUI:Create("Dropdown")
-    classDrop:SetLabel("")
-    classDrop:SetList(classValues)
-    classDrop:SetValue(EchoesDB.classIndex or 1)
-    classDrop:SetHeight(ROW_H)
-    classGroup:AddChild(classDrop)
-    SkinDropdown(classDrop)
-
-    local function ApplyBotClassDropdownColor(idx)
-        if not classDrop or not classDrop.text or not classDrop.text.SetTextColor then return end
-        idx = tonumber(idx) or (EchoesDB.classIndex or 1)
-
-        local colors = rawget(_G, "RAID_CLASS_COLORS")
-        local classFileByIndex = {
-            [1]  = "PALADIN",
-            [2]  = "DEATHKNIGHT",
-            [3]  = "WARRIOR",
-            [4]  = "SHAMAN",
-            [5]  = "HUNTER",
-            [6]  = "DRUID",
-            [7]  = "ROGUE",
-            [8]  = "PRIEST",
-            [9]  = "WARLOCK",
-            [10] = "MAGE",
-        }
-        local cf = classFileByIndex[idx]
-        local c = cf and colors and colors[cf]
-        if c then
-            classDrop.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
-        else
-            classDrop.text:SetTextColor(0.90, 0.85, 0.70, 1)
-        end
-    end
-
-    classDrop:SetCallback("OnValueChanged", function(widget, event, value)
-        EchoesDB.classIndex = value
-        ApplyBotClassDropdownColor(value)
-    end)
-
-    -- Ensure initial color matches selected class.
-    ApplyBotClassDropdownColor(EchoesDB.classIndex or 1)
-
-
-    local function SetClassIndex(idx)
-        if not idx then
-            idx = 1
-        elseif idx < 1 then
-            idx = #CLASSES
-        elseif idx > #CLASSES then
-            idx = 1
-        end
-        EchoesDB.classIndex = idx
-        classDrop:SetValue(idx)
-        ApplyBotClassDropdownColor(idx)
-    end
-
-    local prevBtn = AceGUI:Create("Button")
-    prevBtn:SetText("<")
-    prevBtn:SetWidth(42)
-    prevBtn:SetHeight(ROW_H)
-    prevBtn:SetCallback("OnClick", function()
-        SetClassIndex((EchoesDB.classIndex or 1) - 1)
-    end)
-    classGroup:AddChild(prevBtn)
-    SkinButton(prevBtn)
-
-    local nextBtn = AceGUI:Create("Button")
-    nextBtn:SetText(">")
-    nextBtn:SetWidth(42)
-    nextBtn:SetHeight(ROW_H)
-    nextBtn:SetCallback("OnClick", function()
-        SetClassIndex((EchoesDB.classIndex or 1) + 1)
-    end)
-    classGroup:AddChild(nextBtn)
-    SkinButton(nextBtn)
-
-    if nextBtn.frame and classGroup.frame then
-        nextBtn.frame:ClearAllPoints()
-        nextBtn.frame:SetPoint("RIGHT", classGroup.frame, "RIGHT", -10, 0)
-        nextBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        nextBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-    end
-    if prevBtn.frame and nextBtn.frame then
-        prevBtn.frame:ClearAllPoints()
-        prevBtn.frame:SetPoint("RIGHT", nextBtn.frame, "LEFT", -6, 0)
-        prevBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        prevBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-    end
-    if classDrop.frame and classGroup.frame and classLabel.frame and prevBtn.frame then
-        classDrop.frame:ClearAllPoints()
-        classDrop.frame:SetPoint("LEFT", classLabel.frame, "RIGHT", 10, 0)
-        classDrop.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        classDrop.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-        classDrop.frame:SetPoint("RIGHT", prevBtn.frame, "LEFT", -10, 0)
-    end
-
-    ------------------------------------------------
-    -- 2) Add / Remove row (centered)
-    ------------------------------------------------
-    local addRemGroup = AceGUI:Create("SimpleGroup")
-    addRemGroup:SetFullWidth(true)
-    addRemGroup:SetLayout("Flow")
-    container:AddChild(addRemGroup)
-
-    local spacerL = AceGUI:Create("SimpleGroup")
-    spacerL:SetRelativeWidth(0.05)
-    spacerL:SetLayout("Flow")
-    addRemGroup:AddChild(spacerL)
-
-    local addBtn = AceGUI:Create("Button")
-    addBtn:SetText("Add")
-    addBtn:SetRelativeWidth(0.45)
-    addBtn:SetHeight(ROW_H)
-    addBtn:SetCallback("OnClick", function()
-        local c = GetSelectedClass()
-
-        -- Track bots that whisper "Hello!" after we add them.
-        self._EchoesBotAddSessionActive = true
-        self._EchoesBotAddHelloFrom = {}
-        self._EchoesBotAddSessionId = (tonumber(self._EchoesBotAddSessionId) or 0) + 1
-        local sessionId = self._EchoesBotAddSessionId
-
-        SendChatMessage(".playerbots bot addclass " .. c.cmd, "GUILD")
-
-        -- If "Hello" bots aren't in group after 10s, re-attempt invites.
-        self:RunAfter(10.0, function()
-            if sessionId ~= self._EchoesBotAddSessionId then return end
-            self._EchoesBotAddSessionActive = false
-
-            local helloFrom = self._EchoesBotAddHelloFrom or {}
-            local missing = {}
-            for name, _ in pairs(helloFrom) do
-                if name and name ~= "" and (not Echoes_IsNameInGroup(name)) then
-                    missing[#missing + 1] = { kind = "invite", name = name }
-                end
-            end
-
-            if #missing > 0 then
-                Echoes_Print("Re-inviting missing Hello bots...")
-                self:RunActionQueue(missing, 0.70)
-            end
-        end)
-    end)
-    addRemGroup:AddChild(addBtn)
-    SkinButton(addBtn)
-
-    local remBtn = AceGUI:Create("Button")
-    remBtn:SetText("Remove All")
-    remBtn:SetRelativeWidth(0.45)
-    remBtn:SetHeight(ROW_H)
-    remBtn:SetCallback("OnClick", function()
-        SendCmdKey("REMOVE_ALL")
-    end)
-    addRemGroup:AddChild(remBtn)
-    SkinButton(remBtn)
-
-    local spacerR = AceGUI:Create("SimpleGroup")
-    spacerR:SetRelativeWidth(0.05)
-    spacerR:SetLayout("Flow")
-    addRemGroup:AddChild(spacerR)
-
-    addRemGroup:SetHeight(ROW_H + 2)
-
-    ------------------------------------------------
-    -- 3) Utilities rows: Summon/Release, LevelUp/Drink
-    ------------------------------------------------
-    local function MakeUtilRow(text1, key1, text2, key2)
-        local row = AceGUI:Create("SimpleGroup")
-        row:SetFullWidth(true)
-        row:SetLayout("Flow")
-        container:AddChild(row)
-
-        local rSpacerL = AceGUI:Create("SimpleGroup")
-        rSpacerL:SetRelativeWidth(0.05)
-        rSpacerL:SetLayout("Flow")
-        row:AddChild(rSpacerL)
-
-        local b1 = AceGUI:Create("Button")
-        b1:SetText(text1)
-        b1:SetRelativeWidth(0.45)
-        b1:SetHeight(ROW_H)
-        b1:SetCallback("OnClick", function() SendCmdKey(key1) end)
-        row:AddChild(b1)
-        SkinButton(b1)
-
-        local b2 = AceGUI:Create("Button")
-        b2:SetText(text2)
-        b2:SetRelativeWidth(0.45)
-        b2:SetHeight(ROW_H)
-        b2:SetCallback("OnClick", function() SendCmdKey(key2) end)
-        row:AddChild(b2)
-        SkinButton(b2)
-
-        local rSpacerR = AceGUI:Create("SimpleGroup")
-        rSpacerR:SetRelativeWidth(0.05)
-        rSpacerR:SetLayout("Flow")
-        row:AddChild(rSpacerR)
-
-        row:SetHeight(ROW_H + 2)
-    end
-
-    MakeUtilRow("Summon",  "SUMMON",   "Release",  "RELEASE")
-    MakeUtilRow("Level Up","LEVEL_UP", "Drink",    "DRINK")
-
-    ------------------------------------------------
-    -- 4) Movement: Follow / Stay / Flee (centered)
-    ------------------------------------------------
-    local moveGroup = AceGUI:Create("SimpleGroup")
-    moveGroup:SetFullWidth(true)
-    moveGroup:SetLayout("Flow")
-    container:AddChild(moveGroup)
-
-    local mSpacerL = AceGUI:Create("SimpleGroup")
-    mSpacerL:SetRelativeWidth(0.05)
-    mSpacerL:SetLayout("Flow")
-    moveGroup:AddChild(mSpacerL)
-
-    local followBtn = AceGUI:Create("Button")
-    followBtn:SetText("Follow")
-    followBtn:SetRelativeWidth(0.30)
-    followBtn:SetHeight(ROW_H)
-    followBtn:SetCallback("OnClick", function() SendCmdKey("FOLLOW") end)
-    moveGroup:AddChild(followBtn)
-    SkinButton(followBtn)
-
-    local stayBtn = AceGUI:Create("Button")
-    stayBtn:SetText("Stay")
-    stayBtn:SetRelativeWidth(0.30)
-    stayBtn:SetHeight(ROW_H)
-    stayBtn:SetCallback("OnClick", function() SendCmdKey("STAY") end)
-    moveGroup:AddChild(stayBtn)
-    SkinButton(stayBtn)
-
-    local fleeBtn = AceGUI:Create("Button")
-    fleeBtn:SetText("Flee")
-    fleeBtn:SetRelativeWidth(0.30)
-    fleeBtn:SetHeight(ROW_H)
-    fleeBtn:SetCallback("OnClick", function() SendCmdKey("FLEE") end)
-    moveGroup:AddChild(fleeBtn)
-    SkinButton(fleeBtn)
-
-    local mSpacerR = AceGUI:Create("SimpleGroup")
-    mSpacerR:SetRelativeWidth(0.05)
-    mSpacerR:SetLayout("Flow")
-    moveGroup:AddChild(mSpacerR)
-
-    moveGroup:SetHeight(ROW_H + 2)
-
-    -- Extra vertical spacing between global movement buttons and the role matrix
-    -- (Empty SimpleGroups can collapse in AceGUI Flow layout; use a Label spacer instead.)
-    local moveRoleGap = AceGUI:Create("Label")
-    moveRoleGap:SetText(" ")
-    moveRoleGap:SetFullWidth(true)
-    moveRoleGap:SetHeight(GAP_H)
-    container:AddChild(moveRoleGap)
-
-    ------------------------------------------------
-    -- 5) Role Matrix: label + 4 buttons filling the row
-    ------------------------------------------------
-    local rows = {
-        { label = "Tank",   su = "TANK_SUMMON",   a="TANK_ATTACK", s="TANK_STAY",   f="TANK_FOLLOW",   fl="TANK_FLEE"   },
-        { label = "Melee",  su = "MELEE_SUMMON",  a="MELEE_ATK",   s="MELEE_STAY",  f="MELEE_FOLLOW",  fl="MELEE_FLEE"  },
-        { label = "Ranged", su = "RANGED_SUMMON", a="RANGED_ATK",  s="RANGED_STAY", f="RANGED_FOLLOW", fl="RANGED_FLEE" },
-        { label = "Healer", su = "HEAL_SUMMON",   a="HEAL_ATTACK", s="HEAL_STAY",   f="HEAL_FOLLOW",   fl="HEAL_FLEE"   },
-    }
-
-    for i, row in ipairs(rows) do
-        -- Role header: keep the label and Summon button close together and inside the frame.
-        local header = AceGUI:Create("SimpleGroup")
-        header:SetFullWidth(true)
-        header:SetLayout("None")
-        if header.SetAutoAdjustHeight then header:SetAutoAdjustHeight(false) end
-        header:SetHeight(ROLE_HDR_H)
-        container:AddChild(header)
-        SkinSimpleGroup(header)
-        if header.frame and header.frame.SetBackdropBorderColor then
-            header.frame:SetBackdropBorderColor(0, 0, 0, 0)
-        end
-
-        local summonBtn = AceGUI:Create("Button")
-        summonBtn:SetText("Summon")
-        summonBtn:SetWidth(90)
-        summonBtn:SetHeight(ROLE_HDR_H)
-        summonBtn:SetCallback("OnClick", function() SendCmdKey(row.su) end)
-        header:AddChild(summonBtn)
-        SkinButton(summonBtn)
-
-        if summonBtn.frame and header.frame then
-            summonBtn.frame:ClearAllPoints()
-            -- Keep summon X position consistent across rows and split the row at center.
-            summonBtn.frame:SetPoint("LEFT", header.frame, "CENTER", 10, 0)
-            summonBtn.frame:SetPoint("TOP", header.frame, "TOP", 0, 0)
-            summonBtn.frame:SetPoint("BOTTOM", header.frame, "BOTTOM", 0, 0)
-        end
-
-        if header.frame and header.frame.CreateFontString then
-            local fs = header.frame:CreateFontString(nil, "OVERLAY")
-            -- WoW 3.3.5 throws "Font not set" if SetText runs before SetFont.
-            SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
-            fs:SetText(row.label)
-            -- Center within the left half of the header.
-            fs:SetJustifyH("CENTER")
-            fs:SetJustifyV("MIDDLE")
-            fs:SetPoint("LEFT", header.frame, "LEFT", 10, 0)
-            fs:SetPoint("RIGHT", header.frame, "CENTER", -10, 0)
-            if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
-            header._EchoesRoleHeaderFS = fs
-        end
-
-        local rowGroup = AceGUI:Create("SimpleGroup")
-        rowGroup:SetFullWidth(true)
-        rowGroup:SetLayout("Flow")
-        container:AddChild(rowGroup)
-
-        local rowSpacerL = AceGUI:Create("SimpleGroup")
-        rowSpacerL:SetRelativeWidth(0.06)
-        rowSpacerL:SetLayout("Flow")
-        rowGroup:AddChild(rowSpacerL)
-
-        local function AddRoleButton(text, key)
-            local b = AceGUI:Create("Button")
-            b:SetText(text)
-            b:SetRelativeWidth(0.22) -- 2*0.06 + 4*0.22 = 1.0
-            b:SetHeight(ROLE_ROW_H)
-            -- Slightly smaller so labels don't truncate.
-            b._EchoesFontSize = 9
-            b:SetCallback("OnClick", function() SendCmdKey(key) end)
-            rowGroup:AddChild(b)
-            SkinButton(b)
-        end
-
-        AddRoleButton("Attack", row.a)
-        AddRoleButton("Stay",   row.s)
-        AddRoleButton("Follow", row.f)
-        AddRoleButton("Flee",   row.fl)
-
-        local rowSpacerR = AceGUI:Create("SimpleGroup")
-        rowSpacerR:SetRelativeWidth(0.06)
-        rowSpacerR:SetLayout("Flow")
-        rowGroup:AddChild(rowSpacerR)
-
-        rowGroup:SetHeight(ROLE_ROW_H + 2)
-    end
-end
+-- Bot Control tab is implemented in Modules\BotTab.lua
 
 ------------------------------------------------------------
 -- Group Creation tab (unchanged layout)
@@ -4783,149 +4603,12 @@ function Echoes:UpdateGroupCreationPlayerSlot(force)
     self:UpdateGroupCreationFromRoster(force)
 end
 
-------------------------------------------------------------
--- Echoes tab (now includes UI scale slider)
-------------------------------------------------------------
-function Echoes:BuildEchoesTab(container)
-    container:SetLayout("List")
-
-    local heading = AceGUI:Create("Heading")
-    heading:SetText("Echoes")
-    heading:SetFullWidth(true)
-    SkinHeading(heading)
-    container:AddChild(heading)
-
-    local desc = AceGUI:Create("Label")
-    desc:SetText("Extra tools & settings for the Echoes control panel.")
-    desc:SetFullWidth(true)
-    SkinLabel(desc)
-    container:AddChild(desc)
-
-    local scaleSlider = AceGUI:Create("Slider")
-    scaleSlider:SetLabel("UI Scale")
-    scaleSlider:SetSliderValues(0.5, 2.0, 0.05)
-    scaleSlider:SetValue(EchoesDB.uiScale or 1.0)
-    scaleSlider:SetFullWidth(true)
-    -- IMPORTANT: applying scale while dragging the slider resizes the slider itself,
-    -- which can make AceGUI's Slider jump to the minimum due to the changing mouse/value mapping.
-    -- We only apply the scale after the user releases the mouse.
-    scaleSlider:SetCallback("OnValueChanged", function(widget, event, value)
-        local v = tonumber(value) or (EchoesDB.uiScale or 1.0)
-        v = Clamp(v, 0.5, 2.0)
-        Echoes._EchoesPendingUiScale = v
-    end)
-    scaleSlider:SetCallback("OnMouseUp", function(widget, event, value)
-        local v = tonumber(value) or Echoes._EchoesPendingUiScale or (EchoesDB.uiScale or 1.0)
-        v = Clamp(v, 0.5, 2.0)
-        EchoesDB.uiScale = v
-        Echoes._EchoesPendingUiScale = nil
-        Echoes:ApplyScale()
-    end)
-    container:AddChild(scaleSlider)
-end
+-- Echoes tab is implemented in Modules\EchoesTab.lua
 
 ------------------------------------------------------------
 -- Minimap button
 ------------------------------------------------------------
-local MinimapBtn
-
-local function MinimapButton_UpdatePosition()
-    if not MinimapBtn then return end
-
-    local angle  = tonumber(EchoesDB.minimapAngle) or 220
-    local radius = 80
-    local bx = radius * math.cos(math.rad(angle))
-    local by = radius * math.sin(math.rad(angle))
-
-    MinimapBtn:ClearAllPoints()
-    MinimapBtn:SetPoint("CENTER", Minimap, "CENTER", bx, by)
-end
-
-local function MinimapButton_OnDragUpdate()
-    local cx, cy = GetCursorPosition()
-    local scale = UIParent:GetEffectiveScale()
-    cx, cy = cx / scale, cy / scale
-
-    local mx, my = Minimap:GetCenter()
-    local dx, dy = cx - mx, cy - my
-
-    local angle = math.deg(math.atan2(dy, dx))
-    EchoesDB.minimapAngle = angle
-    MinimapButton_UpdatePosition()
-end
-
-function Echoes:BuildMinimapButton()
-    if MinimapBtn then return end
-
-    local b = CreateFrame("Button", nil, Minimap)
-    MinimapBtn = b
-    b:SetSize(32, 32)
-    b:SetFrameStrata("MEDIUM")
-    b:SetFrameLevel(8)
-    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-    b:RegisterForDrag("LeftButton", "RightButton")
-    b:SetHighlightTexture(nil)
-
-    -- Circular minimap-style button with a visible background color.
-    -- We use Blizzard's tracking background as the alpha shape, tinted dark blue.
-    local fill = b:CreateTexture(nil, "BACKGROUND")
-    fill:SetTexture("Interface\\Minimap\\MiniMap-TrackingBackground")
-    fill:SetSize(54, 54)
-    fill:SetPoint("CENTER", b, "CENTER", 10, -12)
-    fill:SetVertexColor(0.06, 0.10, 0.26, 1.0)
-    b._EchoesFill = fill
-
-    -- Optional subtle texture layer (same circular shape, low alpha)
-    local bg = b:CreateTexture(nil, "BORDER")
-    bg:SetTexture("Interface\\Minimap\\MiniMap-TrackingBackground")
-    bg:SetSize(54, 54)
-    bg:SetPoint("CENTER", b, "CENTER", 10, -12)
-    bg:SetVertexColor(0.18, 0.22, 0.35, 0.20)
-    b._EchoesBG = bg
-
-    local border = b:CreateTexture(nil, "ARTWORK")
-    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    border:SetSize(54, 54)
-    border:SetPoint("CENTER", b, "CENTER", 10, -12)
-    b._EchoesBorder = border
-
-    local label = b:CreateFontString(nil, "OVERLAY")
-    label:SetPoint("CENTER", b, "CENTER", 0, 0)
-    label:SetTextColor(0.95, 0.82, 0.25, 1)
-    SetEchoesFont(label, 16, ECHOES_FONT_FLAGS)
-    label:SetText("E")
-
-    b:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:SetText("Echoes\n|cffAAAAAALeft-click: Toggle window\nRight-drag: Move\nCtrl+Click to reset position.|r")
-        GameTooltip:Show()
-    end)
-
-    b:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-
-    b:SetScript("OnClick", function(self, button)
-        if type(IsControlKeyDown) == "function" and IsControlKeyDown() then
-            Echoes:ResetMainWindowPosition()
-            return
-        end
-        if button == "LeftButton" then
-            Echoes:ToggleMainWindow()
-        end
-    end)
-
-    b:SetScript("OnDragStart", function(self)
-        self:SetScript("OnUpdate", MinimapButton_OnDragUpdate)
-    end)
-
-    b:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-        MinimapButton_UpdatePosition()
-    end)
-
-    MinimapButton_UpdatePosition()
-end
+-- Minimap button is implemented in Modules\Minimap.lua
 
 ------------------------------------------------------------
 -- AceAddon lifecycle

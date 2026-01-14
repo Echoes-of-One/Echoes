@@ -7,9 +7,9 @@ It provides an Ace3-based window (draggable, ElvUI-ish dark skin) with quick act
 ## Requirements
 
 - WoW client: **3.3.5**
-- Library: **Ace3**
+- Library: **Ace3 (embedded)**
   - Echoes embeds Ace3 in `Echoes/Ace3/`, so it does **not** require a separate `Interface/AddOns/Ace3/` addon folder.
-  - If you do have a standalone Ace3 addon installed/enabled, it will safely coexist (duplicate libs are ignored by LibStub).
+  - Having other addons that also embed Ace3 is usually fine (LibStub picks the highest library version).
 
 ## Installation
 

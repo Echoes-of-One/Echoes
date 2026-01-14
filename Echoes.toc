@@ -25,3 +25,6 @@ Ace3\AceTab-3.0\AceTab-3.0.xml
 Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 
 Echoes.lua
+Modules\BotTab.lua
+Modules\EchoesTab.lua
+Modules\Minimap.lua

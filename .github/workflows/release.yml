@@ -67,15 +67,15 @@ jobs:
           cp Echoes.toc dist/Echoes/
 
           if [ ! -d "Ace3" ]; then
-            echo "ERROR: Expected an 'Ace3' folder at repo root, but it was not found." >&2
-            echo "Add Ace3 to this repository (e.g., vendor it or add as a submodule) so releases can include it." >&2
+            echo "ERROR: Expected an 'Ace3' folder inside the Echoes addon (./Ace3), but it was not found." >&2
+            echo "Echoes is packaged as a single standalone addon folder and requires ./Ace3 to be present." >&2
             exit 1
           fi
 
-          # Include Ace3 as a separate addon folder alongside Echoes.
-          cp -R Ace3 dist/
+          # Embed Ace3 inside Echoes so the release zip only needs Interface/AddOns/Echoes.
+          cp -R Ace3 dist/Echoes/
 
-          (cd dist && zip -r "../Echoes-${TAG}.zip" Echoes Ace3)
+          (cd dist && zip -r "../Echoes-${TAG}.zip" Echoes)
           cp "Echoes-${TAG}.zip" "Echoes-latest-${TAG}.zip"
 
       - name: Move 'latest' git tag
