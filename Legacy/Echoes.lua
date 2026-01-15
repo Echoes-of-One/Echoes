@@ -1,4 +1,4 @@
--- Echoes.lua (Ace3 UI version, WoW 3.3.5)
+﻿-- Echoes.lua (Ace3 UI version, WoW 3.3.5)
 -- ElvUI-ish skin, draggable frame, per-tab widths, cleaned Role Matrix & Group Slots,
 -- global UI scale slider on Echoes tab.
 

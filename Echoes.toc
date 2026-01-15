@@ -24,7 +24,23 @@ Ace3\AceComm-3.0\AceComm-3.0.xml
 Ace3\AceTab-3.0\AceTab-3.0.xml
 Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 
-Echoes.lua
+Bootstrap.lua
+
+# Core (shared systems)
+Core\Defaults.lua
+Core\Utils.lua
+Core\Skin.lua
+Core\SpecPanel.lua
+Core\Inventory.lua
+
+# Feature tabs (must load before MainWindow builds them)
+Modules\GroupTab.lua
+
+# Window + lifecycle
+Core\MainWindow.lua
+Core\Lifecycle.lua
+
+# Remaining feature modules
 Modules\BotTab.lua
 Modules\EchoesTab.lua
 Modules\Minimap.lua

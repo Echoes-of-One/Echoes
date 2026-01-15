@@ -90,6 +90,13 @@ function Echoes:BuildBotTab(container)
     classGroup:AddChild(classDrop)
     SkinDropdown(classDrop)
 
+    -- This dropdown's text color is controlled externally (class-color).
+    -- Prevent SkinDropdown from resetting it back to the default gold.
+    classDrop._EchoesPreserveTextColor = true
+    if classDrop.dropdown then
+        classDrop.dropdown._EchoesPreserveTextColor = true
+    end
+
     local function ApplyBotClassDropdownColor(idx)
         if not classDrop or not classDrop.text or not classDrop.text.SetTextColor then return end
         idx = tonumber(idx) or (EchoesDB.classIndex or 1)
