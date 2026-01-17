@@ -399,6 +399,22 @@ local function SkinMainFrame(widget)
         dr:SetScript("OnDragStop", function()
             if Echoes_IsFrameLocked() then return end
             if f.StopMovingOrSizing then f:StopMovingOrSizing() end
+
+            -- Normalize anchoring after dragging.
+            -- WoW may leave the frame anchored by CENTER/other points after StartMoving,
+            -- which makes later resizes (tab switches) appear to "move" the window.
+            -- Re-anchor to TOPLEFT at the current screen position without clamping/saving.
+            if f and UIParent and f.GetLeft and f.GetTop and f.ClearAllPoints and f.SetPoint and UIParent.GetHeight then
+                local left = f:GetLeft()
+                local top = f:GetTop()
+                local parentH = UIParent:GetHeight() or 0
+                if left and top and parentH > 0 then
+                    local x = math.floor(left + 0.5)
+                    local y = math.floor((top - parentH) + 0.5)
+                    f:ClearAllPoints()
+                    f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, y)
+                end
+            end
         end)
 
         f.EchoesDragRegion = dr

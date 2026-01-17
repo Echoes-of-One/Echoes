@@ -74,8 +74,14 @@ local function Echoes_GetTopLeftOffsetsInUIParent(f)
 
     if f.GetPoint then
         local point, relTo, relPoint, xOfs, yOfs = f:GetPoint(1)
-        if point == "TOPLEFT" and relTo == UIParent and relPoint == "TOPLEFT" and xOfs and yOfs then
-            return tonumber(xOfs), tonumber(yOfs)
+        if point == "TOPLEFT" and relTo == UIParent and xOfs and yOfs then
+            if relPoint == "TOPLEFT" then
+                return tonumber(xOfs), tonumber(yOfs)
+            end
+            if relPoint == "BOTTOMLEFT" and UIParent.GetHeight then
+                local parentH = UIParent:GetHeight() or 0
+                return tonumber(xOfs), (tonumber(yOfs) or 0) - parentH
+            end
         end
     end
 
@@ -87,14 +93,11 @@ local function Echoes_GetTopLeftOffsetsInUIParent(f)
     local top = f:GetTop()
     if not left or not top then return nil, nil end
 
-    local scale = f:GetEffectiveScale() or 1
-    local parentScale = UIParent:GetEffectiveScale() or 1
-    if scale <= 0 then scale = 1 end
-    if parentScale <= 0 then parentScale = 1 end
-
     local parentH = UIParent:GetHeight() or 0
-    local x = (left * scale) / parentScale
-    local y = ((top * scale) / parentScale) - parentH
+    -- Fallback: compute from current screen position.
+    -- GetLeft/GetTop are already in UIParent coordinate space for our purposes.
+    local x = left
+    local y = top - parentH
     return x, y
 end
 
@@ -354,8 +357,8 @@ function Echoes:ResetMainWindowPosition()
             if scale <= 0 then scale = 1 end
             if parentScale <= 0 then parentScale = 1 end
 
-            local x = left * scale / parentScale
-            local y = top * scale / parentScale
+            local x = left * parentScale / scale
+            local y = top * parentScale / scale
             f:ClearAllPoints()
             f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
         end

@@ -33,11 +33,6 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
     local parentH = (UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight())
     if not parentW or not parentH then return end
 
-    local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-    if scale <= 0 then scale = 1 end
-    if parentScale <= 0 then parentScale = 1 end
-
     -- Determine current TOPLEFT anchor offsets in UIParent coordinate space.
     -- IMPORTANT: Do not read or write SavedVariables here; this function should only clamp
     -- the *current* position (otherwise we can "snap back" after normal dragging).
@@ -55,17 +50,15 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
         local left = f:GetLeft()
         local top = f:GetTop()
         if left and top then
-            local xBL = left * scale / parentScale
-            local topBL = top * scale / parentScale
-            x = xBL
-            y = topBL - parentH
+            x = left
+            y = top - parentH
         end
     end
 
     if not x or not y then return end
 
-    local w = (f:GetWidth() or 0) * (scale / parentScale)
-    local h = (f:GetHeight() or 0) * (scale / parentScale)
+    local w = (f:GetWidth() or 0)
+    local h = (f:GetHeight() or 0)
 
     local margin = 0
 
