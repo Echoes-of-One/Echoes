@@ -8,13 +8,23 @@ _G.EchoesDB = _G.EchoesDB or {}
 function Echoes:EnsureDefaults()
     local EchoesDB = _G.EchoesDB
 
+    local DEFAULT_UI_SCALE = 0.92
+
     EchoesDB.sendAsChat         = (EchoesDB.sendAsChat ~= nil) and EchoesDB.sendAsChat or false
     EchoesDB.chatChannel        = EchoesDB.chatChannel        or "SAY"
     EchoesDB.groupTemplateIndex = EchoesDB.groupTemplateIndex or 1
     EchoesDB.classIndex         = EchoesDB.classIndex         or 1
     EchoesDB.lastPanel          = EchoesDB.lastPanel          or "BOT"
     EchoesDB.minimapAngle       = EchoesDB.minimapAngle       or 220
-    EchoesDB.uiScale            = EchoesDB.uiScale            or 1.0
+
+    -- UI scale (default slightly smaller)
+    EchoesDB.uiScaleUserSet     = (EchoesDB.uiScaleUserSet ~= nil) and EchoesDB.uiScaleUserSet or false
+    if EchoesDB.uiScale == nil then
+        EchoesDB.uiScale = DEFAULT_UI_SCALE
+    elseif (not EchoesDB.uiScaleUserSet) and tonumber(EchoesDB.uiScale) == 1.0 then
+        -- Migration: older defaults were 1.0; treat as "not user-set".
+        EchoesDB.uiScale = DEFAULT_UI_SCALE
+    end
 
     -- Inventory scan
     EchoesDB.invHideKeys        = (EchoesDB.invHideKeys ~= nil) and EchoesDB.invHideKeys or false
@@ -105,7 +115,7 @@ end
 
 -- Per-tab sizes (frame stays a fixed size, grows right/down)
 Echoes.FRAME_SIZES = {
-    BOT    = { w = 320, h = 480 },
+    BOT    = { w = 320, h = 540 },
     -- Wide enough for the 3-column grid + Name button, but not overly tall.
     GROUP  = { w = 740, h = 440 },
     ECHOES = { w = 320, h = 360 },

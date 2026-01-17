@@ -291,6 +291,9 @@ local function EnsureInvBar(self)
     -- Always spawn centered when opened.
     bar:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 
+    -- Frames are visible by default; keep it closed until explicitly toggled.
+    bar:Hide()
+
     SkinBackdrop(bar, 0.92)
 
     local title = bar:CreateFontString(nil, "OVERLAY")

@@ -347,6 +347,25 @@ local function SkinMainFrame(widget)
         SkinBackdrop(widget.content, 0.6)
     end
 
+    -- Reserve space for our custom footer buttons.
+    local FOOTER_BTN_H = 22
+    local FOOTER_BOTTOM_PAD = 8
+    local FOOTER_TOP_GAP = 8
+    local CONTENT_INSET = 10
+    -- Title bar is offset -2 and height 28 => bottom at -30.
+    -- Use 30 so content starts flush under the title bar.
+    local CONTENT_TOP_INSET = 30
+    local CONTENT_BOTTOM_INSET = FOOTER_BTN_H + FOOTER_BOTTOM_PAD + FOOTER_TOP_GAP + 8
+
+    do
+        local contentFrame = widget.content or f.content
+        if contentFrame and contentFrame.ClearAllPoints and contentFrame.SetPoint then
+            contentFrame:ClearAllPoints()
+            contentFrame:SetPoint("TOPLEFT", f, "TOPLEFT", CONTENT_INSET, -CONTENT_TOP_INSET)
+            contentFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -CONTENT_INSET, CONTENT_BOTTOM_INSET)
+        end
+    end
+
     if widget.titlebg then
         widget.titlebg:Hide()
     end
@@ -380,25 +399,6 @@ local function SkinMainFrame(widget)
         dr:SetScript("OnDragStop", function()
             if Echoes_IsFrameLocked() then return end
             if f.StopMovingOrSizing then f:StopMovingOrSizing() end
-
-            if f.GetLeft and f.GetTop and UIParent and f.SetPoint then
-                local left = f:GetLeft()
-                local top = f:GetTop()
-                if left and top then
-                    local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-                    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-                    if scale <= 0 then scale = 1 end
-                    if parentScale <= 0 then parentScale = 1 end
-                    local x = left * scale / parentScale
-                    local y = top * scale / parentScale
-                    f:ClearAllPoints()
-                    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-                end
-            end
-
-            if Echoes and Echoes.NormalizeAndClampMainWindowToScreen then
-                Echoes:NormalizeAndClampMainWindowToScreen()
-            end
         end)
 
         f.EchoesDragRegion = dr
@@ -665,7 +665,7 @@ local function SkinMainFrame(widget)
         end)
         ib:SetScript("OnClick", function()
             local ok, err = pcall(function()
-                if rawget(_G, "Echoes") and type(Echoes.Inv_ToggleBar) == "function" then
+                if Echoes and type(Echoes.Inv_ToggleBar) == "function" then
                     Echoes:Inv_ToggleBar()
                 end
             end)
@@ -678,36 +678,70 @@ local function SkinMainFrame(widget)
     end
 
     local function LayoutFooterButtons()
-        local w = (f and f.GetWidth and f:GetWidth()) or 0
+        local host = (f and f.content and f.content.GetWidth) and f.content or f
+        local w = (host and host.GetWidth and host:GetWidth()) or 0
         if w <= 0 then return end
 
-        local leftPad, rightPad, gap = 10, 10, 8
+        local gap = 8
+        local leftPad, rightPad
+        if host == f then
+            leftPad, rightPad = 10, 10
+        else
+            leftPad, rightPad = 0, 0
+        end
+
         local usable = w - leftPad - rightPad - (gap * 2)
         if usable <= 0 then return end
 
         local btnW = math.floor(usable / 3)
         if btnW < 50 then btnW = 50 end
 
+        local function PlaceTopAligned(btn)
+            if not btn then return end
+            btn:ClearAllPoints()
+            if host ~= f and host and host.GetPoint then
+                -- No upper margin: buttons sit flush to the top of the reserved footer space,
+                -- i.e. directly under the AceGUI content frame.
+                -- (AceGUI content bottom is already inset up from the frame bottom.)
+                return "TOP", host, "BOTTOM"
+            end
+            return nil
+        end
+
         if f.EchoesSpecButton then
             f.EchoesSpecButton:SetSize(btnW, 22)
-            f.EchoesSpecButton:ClearAllPoints()
-            f.EchoesSpecButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", leftPad, 8)
+            local point, rel, relPoint = PlaceTopAligned(f.EchoesSpecButton)
+            if point then
+                f.EchoesSpecButton:SetPoint("TOPLEFT", host, "BOTTOMLEFT", leftPad, -FOOTER_TOP_GAP)
+            else
+                f.EchoesSpecButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", leftPad, 8)
+            end
         end
 
         if f.EchoesInventoriesButton then
             f.EchoesInventoriesButton:SetSize(btnW, 22)
             f.EchoesInventoriesButton:ClearAllPoints()
             if f.EchoesSpecButton then
-                f.EchoesInventoriesButton:SetPoint("BOTTOMLEFT", f.EchoesSpecButton, "BOTTOMRIGHT", gap, 0)
+                f.EchoesInventoriesButton:SetPoint("TOPLEFT", f.EchoesSpecButton, "TOPRIGHT", gap, 0)
             else
-                f.EchoesInventoriesButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", leftPad + btnW + gap, 8)
+                local point = (host ~= f and host and host.GetPoint) and true or false
+                if point then
+                    f.EchoesInventoriesButton:SetPoint("TOPLEFT", host, "BOTTOMLEFT", leftPad + btnW + gap, -FOOTER_TOP_GAP)
+                else
+                    f.EchoesInventoriesButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", leftPad + btnW + gap, 8)
+                end
             end
         end
 
         if f.EchoesCloseButton then
             f.EchoesCloseButton:SetSize(btnW, 22)
             f.EchoesCloseButton:ClearAllPoints()
-            f.EchoesCloseButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -rightPad, 8)
+            local point = (host ~= f and host and host.GetPoint) and true or false
+            if point then
+                f.EchoesCloseButton:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", -rightPad, -FOOTER_TOP_GAP)
+            else
+                f.EchoesCloseButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -rightPad, 8)
+            end
         end
     end
 
@@ -719,8 +753,6 @@ local function SkinMainFrame(widget)
         if f.EchoesCloseButton then
             if f.EchoesCloseButton.GetParent and f.EchoesCloseButton:GetParent() ~= f and f.EchoesCloseButton.SetParent then
                 f.EchoesCloseButton:SetParent(f)
-                f.EchoesCloseButton:ClearAllPoints()
-                f.EchoesCloseButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 8)
             end
             if f.EchoesCloseButton.SetFrameStrata then f.EchoesCloseButton:SetFrameStrata(baseStrata) end
             if f.EchoesCloseButton.SetFrameLevel then f.EchoesCloseButton:SetFrameLevel(baseLevel + 500) end
@@ -730,8 +762,6 @@ local function SkinMainFrame(widget)
         if f.EchoesSpecButton then
             if f.EchoesSpecButton.GetParent and f.EchoesSpecButton:GetParent() ~= f and f.EchoesSpecButton.SetParent then
                 f.EchoesSpecButton:SetParent(f)
-                f.EchoesSpecButton:ClearAllPoints()
-                f.EchoesSpecButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 8)
             end
             if f.EchoesSpecButton.SetFrameStrata then f.EchoesSpecButton:SetFrameStrata(baseStrata) end
             if f.EchoesSpecButton.SetFrameLevel then f.EchoesSpecButton:SetFrameLevel(baseLevel + 500) end
@@ -742,19 +772,13 @@ local function SkinMainFrame(widget)
             if f.EchoesInventoriesButton.GetParent and f.EchoesInventoriesButton:GetParent() ~= f and f.EchoesInventoriesButton.SetParent then
                 f.EchoesInventoriesButton:SetParent(f)
             end
-            if f.EchoesInventoriesButton.ClearAllPoints and f.EchoesInventoriesButton.SetPoint then
-                f.EchoesInventoriesButton:ClearAllPoints()
-                if f.EchoesSpecButton then
-                    f.EchoesInventoriesButton:SetPoint("BOTTOMLEFT", f.EchoesSpecButton, "BOTTOMRIGHT", 8, 0)
-                else
-                    f.EchoesInventoriesButton:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 178, 8)
-                end
-            end
             if f.EchoesInventoriesButton.SetFrameStrata then f.EchoesInventoriesButton:SetFrameStrata(baseStrata) end
             if f.EchoesInventoriesButton.SetFrameLevel then f.EchoesInventoriesButton:SetFrameLevel(baseLevel + 500) end
             if f.EchoesInventoriesButton.SetToplevel then f.EchoesInventoriesButton:SetToplevel(true) end
             if f.EchoesInventoriesButton.EnableMouse then f.EchoesInventoriesButton:EnableMouse(true) end
         end
+
+        LayoutFooterButtons()
     end
 
     if f.GetChildren then

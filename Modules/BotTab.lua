@@ -22,13 +22,32 @@ function Echoes:BuildBotTab(container)
     -- (List layout can over-allocate spacing depending on widget heights and fontstring metrics on 3.3.5)
     container:SetLayout("Flow")
 
+    -- Build the tab on a single full-width page so the midline between columns
+    -- is the true frame center (Flow "spacer" centering always leaves leftover slack).
+    do
+        local outer = container
+
+        local page = AceGUI:Create("SimpleGroup")
+        page:SetFullWidth(true)
+        -- Use List so we don't get Flow's built-in 3px vertical spacing between rows.
+        page:SetLayout("List")
+        outer:AddChild(page)
+
+        container = page
+    end
+
     local ROW_H = 26
     local LABEL_H = 14
     -- Keep gaps very small so nothing spills outside the frame (WoW doesn't clip children).
     local GAP_H = 0
     -- Role matrix is the lowest section; keep it slightly more compact.
-    local ROLE_ROW_H = 24
-    local ROLE_HDR_H = 18
+    local ROLE_ROW_H = 22
+    local ROLE_HDR_H = 16
+    local ROLE_TITLE_GAP = 5
+
+    local H_INSET = 8
+    local BTN_FONT = 11
+    local ROLE_BTN_FONT = 10
 
     ------------------------------------------------
     -- 1) Class row: dropdown (40%) + spacer + < >
@@ -71,7 +90,7 @@ function Echoes:BuildBotTab(container)
 
     if classLabel.frame and classGroup.frame then
         classLabel.frame:ClearAllPoints()
-        classLabel.frame:SetPoint("LEFT", classGroup.frame, "LEFT", 10, 0)
+        classLabel.frame:SetPoint("LEFT", classGroup.frame, "LEFT", H_INSET, 0)
         classLabel.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
         classLabel.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
     end
@@ -132,77 +151,264 @@ function Echoes:BuildBotTab(container)
     ApplyBotClassDropdownColor(EchoesDB.classIndex or 1)
 
 
-    local function SetClassIndex(idx)
-        if not idx then
-            idx = 1
-        elseif idx < 1 then
-            idx = #CLASSES
-        elseif idx > #CLASSES then
-            idx = 1
-        end
-        EchoesDB.classIndex = idx
-        classDrop:SetValue(idx)
-        ApplyBotClassDropdownColor(idx)
-    end
-
-    local prevBtn = AceGUI:Create("Button")
-    prevBtn:SetText("<")
-    prevBtn:SetWidth(42)
-    prevBtn:SetHeight(ROW_H)
-    prevBtn:SetCallback("OnClick", function()
-        SetClassIndex((EchoesDB.classIndex or 1) - 1)
+    -- Replace the class cycle arrows with a global Summon button (all roles).
+    local summonAllBtn = AceGUI:Create("Button")
+    summonAllBtn:SetText("Summon")
+    summonAllBtn:SetWidth(90)
+    summonAllBtn:SetHeight(ROW_H)
+    summonAllBtn._EchoesFontSize = BTN_FONT
+    summonAllBtn:SetCallback("OnClick", function()
+        SendCmdKey("SUMMON")
     end)
-    classGroup:AddChild(prevBtn)
-    SkinButton(prevBtn)
+    classGroup:AddChild(summonAllBtn)
+    SkinButton(summonAllBtn)
 
-    local nextBtn = AceGUI:Create("Button")
-    nextBtn:SetText(">")
-    nextBtn:SetWidth(42)
-    nextBtn:SetHeight(ROW_H)
-    nextBtn:SetCallback("OnClick", function()
-        SetClassIndex((EchoesDB.classIndex or 1) + 1)
-    end)
-    classGroup:AddChild(nextBtn)
-    SkinButton(nextBtn)
-
-    if nextBtn.frame and classGroup.frame then
-        nextBtn.frame:ClearAllPoints()
-        nextBtn.frame:SetPoint("RIGHT", classGroup.frame, "RIGHT", -10, 0)
-        nextBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        nextBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
+    if summonAllBtn.frame and classGroup.frame then
+        summonAllBtn.frame:ClearAllPoints()
+        summonAllBtn.frame:SetPoint("RIGHT", classGroup.frame, "RIGHT", -H_INSET, 0)
+        summonAllBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
+        summonAllBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
     end
-    if prevBtn.frame and nextBtn.frame then
-        prevBtn.frame:ClearAllPoints()
-        prevBtn.frame:SetPoint("RIGHT", nextBtn.frame, "LEFT", -6, 0)
-        prevBtn.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
-        prevBtn.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-    end
-    if classDrop.frame and classGroup.frame and classLabel.frame and prevBtn.frame then
+    if classDrop.frame and classGroup.frame and classLabel.frame and summonAllBtn.frame then
         classDrop.frame:ClearAllPoints()
         classDrop.frame:SetPoint("LEFT", classLabel.frame, "RIGHT", 10, 0)
         classDrop.frame:SetPoint("TOP", classGroup.frame, "TOP", 0, 0)
         classDrop.frame:SetPoint("BOTTOM", classGroup.frame, "BOTTOM", 0, 0)
-        classDrop.frame:SetPoint("RIGHT", prevBtn.frame, "LEFT", -10, 0)
+        classDrop.frame:SetPoint("RIGHT", summonAllBtn.frame, "LEFT", -10, 0)
     end
 
     ------------------------------------------------
     -- 2) Add / Remove row (centered)
     ------------------------------------------------
-    local addRemGroup = AceGUI:Create("SimpleGroup")
-    addRemGroup:SetFullWidth(true)
-    addRemGroup:SetLayout("Flow")
-    container:AddChild(addRemGroup)
 
-    local spacerL = AceGUI:Create("SimpleGroup")
-    spacerL:SetRelativeWidth(0.05)
-    spacerL:SetLayout("Flow")
-    addRemGroup:AddChild(spacerL)
+    -- Pack the next rows into one tight block (no vertical gaps between rows).
+    local topBlock = AceGUI:Create("SimpleGroup")
+    topBlock:SetFullWidth(true)
+    topBlock:SetLayout("None")
+    if topBlock.SetAutoAdjustHeight then topBlock:SetAutoAdjustHeight(false) end
+    topBlock:SetHeight(ROW_H * 4)
+    container:AddChild(topBlock)
+    SkinSimpleGroup(topBlock)
+    if topBlock.frame and topBlock.frame.SetBackdropBorderColor then
+        topBlock.frame:SetBackdropBorderColor(0, 0, 0, 0)
+    end
 
-    local addBtn = AceGUI:Create("Button")
-    addBtn:SetText("Add")
-    addBtn:SetRelativeWidth(0.45)
-    addBtn:SetHeight(ROW_H)
-    addBtn:SetCallback("OnClick", function()
+    local function AnchorTightRow(rowWidget, y)
+        if not (rowWidget and rowWidget.frame and topBlock.frame) then return end
+        rowWidget.frame:ClearAllPoints()
+        rowWidget.frame:SetPoint("TOPLEFT", topBlock.frame, "TOPLEFT", H_INSET, y)
+        rowWidget.frame:SetPoint("TOPRIGHT", topBlock.frame, "TOPRIGHT", -H_INSET, y)
+    end
+
+    local function LayoutEqualColumns(hostFrame, btnFrames)
+        if not (hostFrame and btnFrames and #btnFrames >= 2) then return end
+
+        -- IMPORTANT: In AceGUI SimpleGroup, children are parented to `widget.content`.
+        -- Anchoring/splitting to the outer `widget.frame` can include border/backdrop
+        -- pixels, which makes the last column look clipped/unequal.
+        if hostFrame._EchoesEqualColsHooked then
+            return
+        end
+        hostFrame._EchoesEqualColsHooked = true
+
+        local function apply()
+            local w = hostFrame:GetWidth() or 0
+            if w <= 0 then return false end
+
+            -- Compute split points in *physical pixels* (effective scale), then
+            -- convert back to UI units. This avoids half-pixel splits that can
+            -- visually shift the divider and make one column look narrower.
+            local scale = 1
+            if hostFrame.GetEffectiveScale then
+                scale = hostFrame:GetEffectiveScale() or 1
+            elseif _G.UIParent and _G.UIParent.GetEffectiveScale then
+                scale = _G.UIParent:GetEffectiveScale() or 1
+            end
+            if not scale or scale <= 0 then scale = 1 end
+
+            -- Prefer actual rendered bounds when available.
+            local wPx
+            if hostFrame.GetLeft and hostFrame.GetRight then
+                local l = hostFrame:GetLeft()
+                local r = hostFrame:GetRight()
+                if l and r and r > l then
+                    wPx = math.floor(((r - l) * scale) + 0.5)
+                end
+            end
+            if not wPx or wPx <= 0 then
+                -- Fall back to width; avoid rounding up.
+                wPx = math.floor((w * scale) + 1e-6)
+            end
+            if wPx <= 0 then return false end
+
+            local cols = #btnFrames
+            if cols == 2 then
+                -- Give any remainder pixel to the right button.
+                local leftPx = math.floor(wPx / 2)
+                local rightPx = wPx - leftPx
+                local leftW = leftPx / scale
+                local rightW = rightPx / scale
+                local x1 = leftW
+
+                local b1, b2 = btnFrames[1], btnFrames[2]
+                b1:ClearAllPoints()
+                b1:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
+                b1:SetPoint("BOTTOMLEFT", hostFrame, "BOTTOMLEFT", 0, 0)
+                if b1.SetWidth then b1:SetWidth(leftW) end
+
+                b2:ClearAllPoints()
+                b2:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", x1, 0)
+                b2:SetPoint("BOTTOMLEFT", hostFrame, "BOTTOMLEFT", x1, 0)
+                if b2.SetWidth then b2:SetWidth(rightW) end
+                return true
+            end
+
+            if cols == 3 then
+                -- Split into 3 integer widths; give remainder pixels to the right,
+                -- then the middle (so the right-most never ends up smaller).
+                local base = math.floor(wPx / 3)
+                local rem = wPx - (base * 3)
+                local w1 = base
+                local w2 = base
+                local w3 = base + rem
+
+                local w1u = w1 / scale
+                local w2u = w2 / scale
+                local w3u = w3 / scale
+                local x1 = w1u
+                local x2 = (w1 + w2) / scale
+
+                local b1, b2, b3 = btnFrames[1], btnFrames[2], btnFrames[3]
+                b1:ClearAllPoints()
+                b1:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", 0, 0)
+                b1:SetPoint("BOTTOMLEFT", hostFrame, "BOTTOMLEFT", 0, 0)
+                if b1.SetWidth then b1:SetWidth(w1u) end
+
+                b2:ClearAllPoints()
+                b2:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", x1, 0)
+                b2:SetPoint("BOTTOMLEFT", hostFrame, "BOTTOMLEFT", x1, 0)
+                if b2.SetWidth then b2:SetWidth(w2u) end
+
+                b3:ClearAllPoints()
+                b3:SetPoint("TOPLEFT", hostFrame, "TOPLEFT", x2, 0)
+                b3:SetPoint("BOTTOMLEFT", hostFrame, "BOTTOMLEFT", x2, 0)
+                if b3.SetWidth then b3:SetWidth(w3u) end
+            end
+
+            return true
+        end
+
+        local function applyWhenReady()
+            if apply() then
+                if hostFrame._EchoesEqualColsOnUpdate then
+                    hostFrame:SetScript("OnUpdate", nil)
+                    hostFrame._EchoesEqualColsOnUpdate = nil
+                end
+                return
+            end
+
+            if hostFrame._EchoesEqualColsOnUpdate then return end
+            hostFrame._EchoesEqualColsOnUpdate = true
+            hostFrame:SetScript("OnUpdate", function(self)
+                if apply() then
+                    self:SetScript("OnUpdate", nil)
+                    self._EchoesEqualColsOnUpdate = nil
+                end
+            end)
+        end
+
+        if hostFrame.HookScript then
+            hostFrame:HookScript("OnShow", applyWhenReady)
+            hostFrame:HookScript("OnSizeChanged", applyWhenReady)
+        else
+            hostFrame:SetScript("OnShow", applyWhenReady)
+            hostFrame:SetScript("OnSizeChanged", applyWhenReady)
+        end
+
+        applyWhenReady()
+    end
+
+    local function MakeButton(text, height, fontSize, onClick)
+        local b = AceGUI:Create("Button")
+        b:SetText(text)
+        b:SetHeight(height)
+        b._EchoesFontSize = fontSize
+        b:SetCallback("OnClick", onClick)
+        SkinButton(b)
+        return b
+    end
+
+    local function MakeTwoButtonRow(parent, height, fontSize, leftText, leftAction, rightText, rightAction)
+        local row = AceGUI:Create("SimpleGroup")
+        row:SetFullWidth(true)
+        row:SetLayout("None")
+        if row.SetAutoAdjustHeight then row:SetAutoAdjustHeight(false) end
+        row:SetHeight(height)
+        parent:AddChild(row)
+        SkinSimpleGroup(row)
+        if row.frame and row.frame.SetBackdropBorderColor then
+            row.frame:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+
+        local function ClickFor(action)
+            return function()
+                if type(action) == "function" then
+                    action()
+                else
+                    SendCmdKey(action)
+                end
+            end
+        end
+
+        local leftBtn = MakeButton(leftText, height, fontSize, ClickFor(leftAction))
+        local rightBtn = MakeButton(rightText, height, fontSize, ClickFor(rightAction))
+        row:AddChild(leftBtn)
+        row:AddChild(rightBtn)
+
+        if (row.content or row.frame) and leftBtn.frame and rightBtn.frame then
+            LayoutEqualColumns(row.content or row.frame, { leftBtn.frame, rightBtn.frame })
+        end
+
+        return row
+    end
+
+    local function MakeThreeButtonRow(parent, height, fontSize, leftText, leftAction, midText, midAction, rightText, rightAction)
+        local row = AceGUI:Create("SimpleGroup")
+        row:SetFullWidth(true)
+        row:SetLayout("None")
+        if row.SetAutoAdjustHeight then row:SetAutoAdjustHeight(false) end
+        row:SetHeight(height)
+        parent:AddChild(row)
+        SkinSimpleGroup(row)
+        if row.frame and row.frame.SetBackdropBorderColor then
+            row.frame:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+
+        local function ClickFor(action)
+            return function()
+                if type(action) == "function" then
+                    action()
+                else
+                    SendCmdKey(action)
+                end
+            end
+        end
+
+        local leftBtn = MakeButton(leftText, height, fontSize, ClickFor(leftAction))
+        local midBtn = MakeButton(midText, height, fontSize, ClickFor(midAction))
+        local rightBtn = MakeButton(rightText, height, fontSize, ClickFor(rightAction))
+        row:AddChild(leftBtn)
+        row:AddChild(midBtn)
+        row:AddChild(rightBtn)
+
+        if (row.content or row.frame) and leftBtn.frame and midBtn.frame and rightBtn.frame then
+            LayoutEqualColumns(row.content or row.frame, { leftBtn.frame, midBtn.frame, rightBtn.frame })
+        end
+
+        return row
+    end
+
+    local function DoAddClass()
         local c = GetSelectedClass()
 
         -- Track bots that whisper "Hello!" after we add them.
@@ -231,122 +437,62 @@ function Echoes:BuildBotTab(container)
                 self:RunActionQueue(missing, 0.70)
             end
         end)
-    end)
-    addRemGroup:AddChild(addBtn)
-    SkinButton(addBtn)
-
-    local remBtn = AceGUI:Create("Button")
-    remBtn:SetText("Remove All")
-    remBtn:SetRelativeWidth(0.45)
-    remBtn:SetHeight(ROW_H)
-    remBtn:SetCallback("OnClick", function()
-        SendCmdKey("REMOVE_ALL")
-    end)
-    addRemGroup:AddChild(remBtn)
-    SkinButton(remBtn)
-
-    local spacerR = AceGUI:Create("SimpleGroup")
-    spacerR:SetRelativeWidth(0.05)
-    spacerR:SetLayout("Flow")
-    addRemGroup:AddChild(spacerR)
-
-    addRemGroup:SetHeight(ROW_H + 2)
-
-    ------------------------------------------------
-    -- 3) Utilities rows: Summon/Release, LevelUp/Drink
-    ------------------------------------------------
-    local function MakeUtilRow(text1, key1, text2, key2)
-        local row = AceGUI:Create("SimpleGroup")
-        row:SetFullWidth(true)
-        row:SetLayout("Flow")
-        container:AddChild(row)
-
-        local rSpacerL = AceGUI:Create("SimpleGroup")
-        rSpacerL:SetRelativeWidth(0.05)
-        rSpacerL:SetLayout("Flow")
-        row:AddChild(rSpacerL)
-
-        local b1 = AceGUI:Create("Button")
-        b1:SetText(text1)
-        b1:SetRelativeWidth(0.45)
-        b1:SetHeight(ROW_H)
-        b1:SetCallback("OnClick", function() SendCmdKey(key1) end)
-        row:AddChild(b1)
-        SkinButton(b1)
-
-        local b2 = AceGUI:Create("Button")
-        b2:SetText(text2)
-        b2:SetRelativeWidth(0.45)
-        b2:SetHeight(ROW_H)
-        b2:SetCallback("OnClick", function() SendCmdKey(key2) end)
-        row:AddChild(b2)
-        SkinButton(b2)
-
-        local rSpacerR = AceGUI:Create("SimpleGroup")
-        rSpacerR:SetRelativeWidth(0.05)
-        rSpacerR:SetLayout("Flow")
-        row:AddChild(rSpacerR)
-
-        row:SetHeight(ROW_H + 2)
     end
 
-    MakeUtilRow("Summon",  "SUMMON",   "Release",  "RELEASE")
-    MakeUtilRow("Level Up","LEVEL_UP", "Drink",    "DRINK")
+    local addRemGroup = MakeTwoButtonRow(topBlock, ROW_H, BTN_FONT, "Add", DoAddClass, "Remove All", "REMOVE_ALL")
+    AnchorTightRow(addRemGroup, 0)
+
+    ------------------------------------------------
+    -- 3) Utilities rows: Attack/Release, LevelUp/Drink
+    ------------------------------------------------
+    local function MakeUtilRow(parent, text1, action1, text2, action2)
+        return MakeTwoButtonRow(parent, ROW_H, BTN_FONT, text1, action1, text2, action2)
+    end
+
+    local function BroadcastAttack()
+        local chan
+        if type(IsInRaid) == "function" and IsInRaid() then
+            chan = "RAID"
+        elseif type(GetNumRaidMembers) == "function" and (GetNumRaidMembers() or 0) > 0 then
+            chan = "RAID"
+        elseif type(GetNumPartyMembers) == "function" and (GetNumPartyMembers() or 0) > 0 then
+            chan = "PARTY"
+        end
+
+        if not chan then
+            Echoes_Print("Echoes: not in a party or raid")
+            return
+        end
+
+        if type(SendChatMessage) == "function" then
+            SendChatMessage("attack", chan)
+        end
+    end
+
+    local utilRow1 = MakeUtilRow(topBlock, "Attack",  BroadcastAttack, "Release",  "RELEASE")
+    AnchorTightRow(utilRow1, -ROW_H)
+
+    local utilRow2 = MakeUtilRow(topBlock, "Level Up","LEVEL_UP", "Drink",    "DRINK")
+    AnchorTightRow(utilRow2, -ROW_H * 2)
 
     ------------------------------------------------
     -- 4) Movement: Follow / Stay / Flee (centered)
     ------------------------------------------------
-    local moveGroup = AceGUI:Create("SimpleGroup")
-    moveGroup:SetFullWidth(true)
-    moveGroup:SetLayout("Flow")
-    container:AddChild(moveGroup)
+    local moveGroup = MakeThreeButtonRow(topBlock, ROW_H, BTN_FONT, "Follow", "FOLLOW", "Stay", "STAY", "Flee", "FLEE")
+    AnchorTightRow(moveGroup, -ROW_H * 3)
 
-    local mSpacerL = AceGUI:Create("SimpleGroup")
-    mSpacerL:SetRelativeWidth(0.05)
-    mSpacerL:SetLayout("Flow")
-    moveGroup:AddChild(mSpacerL)
-
-    local followBtn = AceGUI:Create("Button")
-    followBtn:SetText("Follow")
-    followBtn:SetRelativeWidth(0.30)
-    followBtn:SetHeight(ROW_H)
-    followBtn:SetCallback("OnClick", function() SendCmdKey("FOLLOW") end)
-    moveGroup:AddChild(followBtn)
-    SkinButton(followBtn)
-
-    local stayBtn = AceGUI:Create("Button")
-    stayBtn:SetText("Stay")
-    stayBtn:SetRelativeWidth(0.30)
-    stayBtn:SetHeight(ROW_H)
-    stayBtn:SetCallback("OnClick", function() SendCmdKey("STAY") end)
-    moveGroup:AddChild(stayBtn)
-    SkinButton(stayBtn)
-
-    local fleeBtn = AceGUI:Create("Button")
-    fleeBtn:SetText("Flee")
-    fleeBtn:SetRelativeWidth(0.30)
-    fleeBtn:SetHeight(ROW_H)
-    fleeBtn:SetCallback("OnClick", function() SendCmdKey("FLEE") end)
-    moveGroup:AddChild(fleeBtn)
-    SkinButton(fleeBtn)
-
-    local mSpacerR = AceGUI:Create("SimpleGroup")
-    mSpacerR:SetRelativeWidth(0.05)
-    mSpacerR:SetLayout("Flow")
-    moveGroup:AddChild(mSpacerR)
-
-    moveGroup:SetHeight(ROW_H + 2)
-
-    -- Extra vertical spacing between global movement buttons and the role matrix
-    -- (Empty SimpleGroups can collapse in AceGUI Flow layout; use a Label spacer instead.)
-    local moveRoleGap = AceGUI:Create("Label")
-    moveRoleGap:SetText(" ")
-    moveRoleGap:SetFullWidth(true)
-    moveRoleGap:SetHeight(GAP_H)
-    container:AddChild(moveRoleGap)
+    -- Breathing room between the top control block and the role sections.
+    local topRoleGap = AceGUI:Create("Label")
+    topRoleGap:SetText(" ")
+    topRoleGap:SetFullWidth(true)
+    topRoleGap:SetHeight(10)
+    container:AddChild(topRoleGap)
 
     ------------------------------------------------
-    -- 5) Role Matrix: label + 4 buttons filling the row
+    -- 5) Role Matrix (compact)
+    --    Row 1: Role title (centered)
+    --    Row 2: Summon / Stay / Follow
+    --    Row 3: Attack / Flee
     ------------------------------------------------
     local rows = {
         { label = "Tank",   su = "TANK_SUMMON",   a="TANK_ATTACK", s="TANK_STAY",   f="TANK_FOLLOW",   fl="TANK_FLEE"   },
@@ -355,81 +501,127 @@ function Echoes:BuildBotTab(container)
         { label = "Healer", su = "HEAL_SUMMON",   a="HEAL_ATTACK", s="HEAL_STAY",   f="HEAL_FOLLOW",   fl="HEAL_FLEE"   },
     }
 
-    for i, row in ipairs(rows) do
-        -- Role header: keep the label and Summon button close together and inside the frame.
+    local function AddRoleTitle(text)
         local header = AceGUI:Create("SimpleGroup")
         header:SetFullWidth(true)
         header:SetLayout("None")
         if header.SetAutoAdjustHeight then header:SetAutoAdjustHeight(false) end
         header:SetHeight(ROLE_HDR_H)
-        container:AddChild(header)
+        return header
+    end
+
+    local function EnsureRoleTitle(header, text)
+        if not header then return end
         SkinSimpleGroup(header)
         if header.frame and header.frame.SetBackdropBorderColor then
             header.frame:SetBackdropBorderColor(0, 0, 0, 0)
         end
 
-        local summonBtn = AceGUI:Create("Button")
-        summonBtn:SetText("Summon")
-        summonBtn:SetWidth(90)
-        summonBtn:SetHeight(ROLE_HDR_H)
-        summonBtn:SetCallback("OnClick", function() SendCmdKey(row.su) end)
-        header:AddChild(summonBtn)
-        SkinButton(summonBtn)
-
-        if summonBtn.frame and header.frame then
-            summonBtn.frame:ClearAllPoints()
-            -- Keep summon X position consistent across rows and split the row at center.
-            summonBtn.frame:SetPoint("LEFT", header.frame, "CENTER", 10, 0)
-            summonBtn.frame:SetPoint("TOP", header.frame, "TOP", 0, 0)
-            summonBtn.frame:SetPoint("BOTTOM", header.frame, "BOTTOM", 0, 0)
-        end
-
         if header.frame and header.frame.CreateFontString then
             local fs = header.frame:CreateFontString(nil, "OVERLAY")
-            -- WoW 3.3.5 throws "Font not set" if SetText runs before SetFont.
-            SetEchoesFont(fs, 12, ECHOES_FONT_FLAGS)
-            fs:SetText(row.label)
-            -- Center within the left half of the header.
+            SetEchoesFont(fs, 13, ECHOES_FONT_FLAGS)
+            fs:SetText(tostring(text or ""))
             fs:SetJustifyH("CENTER")
             fs:SetJustifyV("MIDDLE")
             fs:SetPoint("LEFT", header.frame, "LEFT", 10, 0)
-            fs:SetPoint("RIGHT", header.frame, "CENTER", -10, 0)
-            if fs.SetTextColor then fs:SetTextColor(0.85, 0.85, 0.85, 1) end
+            fs:SetPoint("RIGHT", header.frame, "RIGHT", -10, 0)
+            if fs.SetTextColor then fs:SetTextColor(0.95, 0.95, 0.95, 1) end
             header._EchoesRoleHeaderFS = fs
         end
+    end
 
+    local function AddRoleRow3(text1, key1, text2, key2, text3, key3)
+        -- Equal widths, touching, aligned on the frame centerline.
         local rowGroup = AceGUI:Create("SimpleGroup")
         rowGroup:SetFullWidth(true)
-        rowGroup:SetLayout("Flow")
-        container:AddChild(rowGroup)
-
-        local rowSpacerL = AceGUI:Create("SimpleGroup")
-        rowSpacerL:SetRelativeWidth(0.06)
-        rowSpacerL:SetLayout("Flow")
-        rowGroup:AddChild(rowSpacerL)
-
-        local function AddRoleButton(text, key)
-            local b = AceGUI:Create("Button")
-            b:SetText(text)
-            b:SetRelativeWidth(0.22) -- 2*0.06 + 4*0.22 = 1.0
-            b:SetHeight(ROLE_ROW_H)
-            -- Slightly smaller so labels don't truncate.
-            b._EchoesFontSize = 9
-            b:SetCallback("OnClick", function() SendCmdKey(key) end)
-            rowGroup:AddChild(b)
-            SkinButton(b)
+        rowGroup:SetLayout("None")
+        if rowGroup.SetAutoAdjustHeight then rowGroup:SetAutoAdjustHeight(false) end
+        rowGroup:SetHeight(ROLE_ROW_H)
+        SkinSimpleGroup(rowGroup)
+        if rowGroup.frame and rowGroup.frame.SetBackdropBorderColor then
+            rowGroup.frame:SetBackdropBorderColor(0, 0, 0, 0)
         end
 
-        AddRoleButton("Attack", row.a)
-        AddRoleButton("Stay",   row.s)
-        AddRoleButton("Follow", row.f)
-        AddRoleButton("Flee",   row.fl)
+        local leftBtn = MakeButton(text1, ROLE_ROW_H, ROLE_BTN_FONT, function() SendCmdKey(key1) end)
+        local midBtn = MakeButton(text2, ROLE_ROW_H, ROLE_BTN_FONT, function() SendCmdKey(key2) end)
+        local rightBtn = MakeButton(text3, ROLE_ROW_H, ROLE_BTN_FONT, function() SendCmdKey(key3) end)
+        rowGroup:AddChild(leftBtn)
+        rowGroup:AddChild(midBtn)
+        rowGroup:AddChild(rightBtn)
 
-        local rowSpacerR = AceGUI:Create("SimpleGroup")
-        rowSpacerR:SetRelativeWidth(0.06)
-        rowSpacerR:SetLayout("Flow")
-        rowGroup:AddChild(rowSpacerR)
+        if (rowGroup.content or rowGroup.frame) and leftBtn.frame and midBtn.frame and rightBtn.frame then
+            LayoutEqualColumns(rowGroup.content or rowGroup.frame, { leftBtn.frame, midBtn.frame, rightBtn.frame })
+        end
 
-        rowGroup:SetHeight(ROLE_ROW_H + 2)
+        return rowGroup
+    end
+
+    local function AddRoleRow2(text1, key1, text2, key2)
+        -- Equal widths, touching, split exactly on the frame centerline.
+        local rowGroup = AceGUI:Create("SimpleGroup")
+        rowGroup:SetFullWidth(true)
+        rowGroup:SetLayout("None")
+        if rowGroup.SetAutoAdjustHeight then rowGroup:SetAutoAdjustHeight(false) end
+        rowGroup:SetHeight(ROLE_ROW_H)
+        SkinSimpleGroup(rowGroup)
+        if rowGroup.frame and rowGroup.frame.SetBackdropBorderColor then
+            rowGroup.frame:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+
+        local leftBtn = MakeButton(text1, ROLE_ROW_H, ROLE_BTN_FONT, function() SendCmdKey(key1) end)
+        local rightBtn = MakeButton(text2, ROLE_ROW_H, ROLE_BTN_FONT, function() SendCmdKey(key2) end)
+        rowGroup:AddChild(leftBtn)
+        rowGroup:AddChild(rightBtn)
+
+        if (rowGroup.content or rowGroup.frame) and leftBtn.frame and rightBtn.frame then
+            LayoutEqualColumns(rowGroup.content or rowGroup.frame, { leftBtn.frame, rightBtn.frame })
+        end
+
+        return rowGroup
+    end
+
+    for i, row in ipairs(rows) do
+        local block = AceGUI:Create("SimpleGroup")
+        block:SetFullWidth(true)
+        block:SetLayout("None")
+        if block.SetAutoAdjustHeight then block:SetAutoAdjustHeight(false) end
+        block:SetHeight(ROLE_HDR_H + ROLE_TITLE_GAP + (ROLE_ROW_H * 2))
+        container:AddChild(block)
+        SkinSimpleGroup(block)
+        if block.frame and block.frame.SetBackdropBorderColor then
+            block.frame:SetBackdropBorderColor(0, 0, 0, 0)
+        end
+
+        local header = AddRoleTitle(row.label)
+        block:AddChild(header)
+        EnsureRoleTitle(header, row.label)
+
+        local r1 = AddRoleRow3("Summon", row.su, "Stay", row.s, "Follow", row.f)
+        block:AddChild(r1)
+
+        local r2 = AddRoleRow2("Attack", row.a, "Flee", row.fl)
+        block:AddChild(r2)
+
+        if header.frame and block.frame then
+            header.frame:ClearAllPoints()
+            header.frame:SetPoint("TOPLEFT", block.frame, "TOPLEFT", H_INSET, 0)
+            header.frame:SetPoint("TOPRIGHT", block.frame, "TOPRIGHT", -H_INSET, 0)
+        end
+        if r1.frame and block.frame then
+            r1.frame:ClearAllPoints()
+            r1.frame:SetPoint("TOPLEFT", block.frame, "TOPLEFT", H_INSET, -ROLE_HDR_H - ROLE_TITLE_GAP)
+            r1.frame:SetPoint("TOPRIGHT", block.frame, "TOPRIGHT", -H_INSET, -ROLE_HDR_H - ROLE_TITLE_GAP)
+        end
+        if r2.frame and block.frame then
+            r2.frame:ClearAllPoints()
+            r2.frame:SetPoint("TOPLEFT", block.frame, "TOPLEFT", H_INSET, -ROLE_HDR_H - ROLE_TITLE_GAP - ROLE_ROW_H)
+            r2.frame:SetPoint("TOPRIGHT", block.frame, "TOPRIGHT", -H_INSET, -ROLE_HDR_H - ROLE_TITLE_GAP - ROLE_ROW_H)
+        end
+
+        local roleGap = AceGUI:Create("Label")
+        roleGap:SetText(" ")
+        roleGap:SetFullWidth(true)
+        roleGap:SetHeight(10)
+        container:AddChild(roleGap)
     end
 end

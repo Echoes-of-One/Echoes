@@ -25,23 +25,7 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
     local f = widget and widget.frame
     if not f or not UIParent then return end
 
-    if f.GetLeft and f.GetTop and f.SetPoint and f.ClearAllPoints then
-        local left = f:GetLeft()
-        local top = f:GetTop()
-        if left and top then
-            local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-            local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-            if scale <= 0 then scale = 1 end
-            if parentScale <= 0 then parentScale = 1 end
-
-            local x = left * scale / parentScale
-            local y = top * scale / parentScale
-            f:ClearAllPoints()
-            f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-        end
-    end
-
-    if not (f.GetLeft and f.GetTop and f.GetWidth and f.GetHeight and f.SetPoint and f.ClearAllPoints) then
+    if not (f.GetWidth and f.GetHeight and f.SetPoint and f.ClearAllPoints) then
         return
     end
 
@@ -49,22 +33,41 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
     local parentH = (UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight())
     if not parentW or not parentH then return end
 
-    local left = f:GetLeft()
-    local top = f:GetTop()
-    if not left or not top then return end
-
     local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
     local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
     if scale <= 0 then scale = 1 end
     if parentScale <= 0 then parentScale = 1 end
 
-    local x = left * scale / parentScale
-    local y = top * scale / parentScale
+    -- Determine current TOPLEFT anchor offsets in UIParent coordinate space.
+    -- IMPORTANT: Do not read or write SavedVariables here; this function should only clamp
+    -- the *current* position (otherwise we can "snap back" after normal dragging).
+    local x, y
+
+    if f.GetPoint then
+        local point, relTo, relPoint, xOfs, yOfs = f:GetPoint(1)
+        if point == "TOPLEFT" and relTo == UIParent and relPoint == "TOPLEFT" and xOfs and yOfs then
+            x, y = tonumber(xOfs), tonumber(yOfs)
+        end
+    end
+
+    -- Fallback: compute from screen position.
+    if (not x or not y) and f.GetLeft and f.GetTop then
+        local left = f:GetLeft()
+        local top = f:GetTop()
+        if left and top then
+            local xBL = left * scale / parentScale
+            local topBL = top * scale / parentScale
+            x = xBL
+            y = topBL - parentH
+        end
+    end
+
+    if not x or not y then return end
 
     local w = (f:GetWidth() or 0) * (scale / parentScale)
     local h = (f:GetHeight() or 0) * (scale / parentScale)
 
-    local margin = 20
+    local margin = 0
 
     if w <= 0 or h <= 0 or w > parentW or h > parentH then
         f:ClearAllPoints()
@@ -74,14 +77,15 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
 
     local minX = margin
     local maxX = parentW - margin - w
-    local minY = h + margin
-    local maxY = parentH - margin
+    -- With TOPLEFT->TOPLEFT anchoring, y is negative when the frame is moved downward.
+    local minY = (-parentH) + margin + h
+    local maxY = -margin
 
     x = Clamp(x, minX, maxX)
     y = Clamp(y, minY, maxY)
 
     f:ClearAllPoints()
-    f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+    f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, y)
 end
 
 local function Echoes_GetPlayerSpecLabel(classFile)
