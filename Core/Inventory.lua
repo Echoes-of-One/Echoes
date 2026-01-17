@@ -11,6 +11,18 @@ local ECHOES_FONT_FLAGS = Echoes.ECHOES_FONT_FLAGS
 
 local CRATE_ITEM_FALLBACK_NAME = "Foror's Crate of Endless Resist Gear Storage"
 local CRATE_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_QuestionMark"
+local CLASS_ICON_TEXTURES = {
+    PALADIN = "Interface\\Icons\\ClassIcon_Paladin",
+    DEATHKNIGHT = "Interface\\Icons\\ClassIcon_DeathKnight",
+    WARRIOR = "Interface\\Icons\\ClassIcon_Warrior",
+    SHAMAN = "Interface\\Icons\\ClassIcon_Shaman",
+    HUNTER = "Interface\\Icons\\ClassIcon_Hunter",
+    DRUID = "Interface\\Icons\\ClassIcon_Druid",
+    ROGUE = "Interface\\Icons\\ClassIcon_Rogue",
+    PRIEST = "Interface\\Icons\\ClassIcon_Priest",
+    WARLOCK = "Interface\\Icons\\ClassIcon_Warlock",
+    MAGE = "Interface\\Icons\\ClassIcon_Mage",
+}
 
 local function Trim(s)
     s = tostring(s or "")
@@ -41,7 +53,6 @@ local function IsInventoryHeaderLine(msg)
     if lower:match("^inventory%s*$") then return true end
     return false
 end
-
 local function GetEntryName(entry)
     if not entry then return "" end
     if entry.name and entry.name ~= "" then
@@ -120,16 +131,26 @@ local function GetGroupMemberNames()
         me = NormalizeName(UnitName("player"))
     end
 
+    local seen = {}
+    local function addMember(name, classFile)
+        if not name or name == "" then return end
+        local norm = NormalizeName(name)
+        if norm == "" or norm == me or seen[norm] then return end
+        seen[norm] = true
+        names[#names + 1] = {
+            name = norm,
+            classFile = classFile,
+            display = name,
+        }
+    end
+
     -- Raid
     if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
         local n = GetNumRaidMembers() or 0
         if n > 0 then
             for i = 1, n do
-                local name = GetRaidRosterInfo(i)
-                name = NormalizeName(name)
-                if name ~= "" and name ~= me then
-                    names[#names + 1] = name
-                end
+                local name, _, _, _, _, classFile = GetRaidRosterInfo(i)
+                addMember(name, classFile)
             end
             return names
         end
@@ -141,10 +162,10 @@ local function GetGroupMemberNames()
         if nParty > 0 then
             if type(UnitName) == "function" then
                 for i = 1, math.min(4, nParty) do
-                    local name = NormalizeName(UnitName("party" .. i))
-                    if name ~= "" and name ~= me then
-                        names[#names + 1] = name
-                    end
+                    local unit = "party" .. i
+                    local name = UnitName(unit)
+                    local _, classFile = type(UnitClass) == "function" and UnitClass(unit) or nil
+                    addMember(name, classFile)
                 end
             end
             return names
@@ -153,6 +174,14 @@ local function GetGroupMemberNames()
 
     -- Solo: just player
     return names
+end
+
+local function GetClassIconTexture(classFile)
+    if classFile and type(classFile) == "string" then
+        local tex = CLASS_ICON_TEXTURES[classFile]
+        if tex then return tex end
+    end
+    return GetCrateIconTexture()
 end
 
 local function IsSelf(name)
@@ -1005,14 +1034,12 @@ local function RebuildInvBarButtons(self)
         if b and b.Hide then b:Hide() end
     end
 
-    local tex = GetCrateIconTexture()
-
     local x0 = 10
     local y0 = -24
     local size = 30
     local gap = 6
 
-    for i, name in ipairs(members) do
+    for i, member in ipairs(members) do
         local b = bar._EchoesButtons[i]
         if not b then
             b = CreateFrame("Button", nil, bar)
@@ -1032,7 +1059,7 @@ local function RebuildInvBarButtons(self)
             b:SetScript("OnEnter", function(selfBtn)
                 if rawget(_G, "GameTooltip") then
                     GameTooltip:SetOwner(selfBtn, "ANCHOR_RIGHT")
-                    GameTooltip:SetText(tostring(selfBtn._EchoesPlayerName or ""), 1, 1, 1)
+                    GameTooltip:SetText(tostring(selfBtn._EchoesDisplayName or selfBtn._EchoesPlayerName or ""), 1, 1, 1)
                     GameTooltip:AddLine("Ctrl+Shift+Right-Click: Sell All Items", 0.8, 0.8, 0.8)
                     GameTooltip:Show()
                 end
@@ -1060,9 +1087,13 @@ local function RebuildInvBarButtons(self)
             bar._EchoesButtons[i] = b
         end
 
-        b._EchoesPlayerName = name
+        local normName = member.name or ""
+        local displayName = member.display or normName
+        local classFile = member.classFile
+        b._EchoesPlayerName = normName
+        b._EchoesDisplayName = displayName
         if b._EchoesIcon and b._EchoesIcon.SetTexture then
-            b._EchoesIcon:SetTexture(tex)
+            b._EchoesIcon:SetTexture(GetClassIconTexture(classFile))
         end
 
         b:ClearAllPoints()

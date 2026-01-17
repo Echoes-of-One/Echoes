@@ -173,6 +173,8 @@ function Echoes:ApplyFrameSizeForTab(key)
 
     local native = frame.frame
 
+
+
     local EchoesDB = _G.EchoesDB
     local scale = EchoesDB.uiScale or 1.0
     if scale < 0.01 then scale = 1.0 end

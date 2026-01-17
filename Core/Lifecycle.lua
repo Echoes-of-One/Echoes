@@ -13,6 +13,18 @@ function Echoes:OnInitialize()
 
     self:RegisterChatCommand("echoes", "ChatCommand")
     self:RegisterChatCommand("ech",    "ChatCommand")
+
+    -- Fallback slash registration (in case AceConsole registration fails).
+    if not _G.SlashCmdList or not _G.SLASH_ECHOES1 then
+        _G.SlashCmdList = _G.SlashCmdList or {}
+        _G.SLASH_ECHOES1 = "/echoes"
+        _G.SLASH_ECHOES2 = "/ech"
+        _G.SlashCmdList["ECHOES"] = function(msg)
+            if Echoes and Echoes.ChatCommand then
+                Echoes:ChatCommand(msg)
+            end
+        end
+    end
 end
 
 function Echoes:OnEnable()
