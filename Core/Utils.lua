@@ -31,6 +31,13 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
 
     local parentW = (UIParent.GetWidth and UIParent:GetWidth()) or (GetScreenWidth and GetScreenWidth())
     local parentH = (UIParent.GetHeight and UIParent:GetHeight()) or (GetScreenHeight and GetScreenHeight())
+    local parentTop = parentH
+    if UIParent.GetRect then
+        local _, pb, _, ph = UIParent:GetRect()
+        if pb and ph then
+            parentTop = pb + ph
+        end
+    end
     if not parentW or not parentH then return end
 
     -- Determine current TOPLEFT anchor offsets in UIParent coordinate space.
@@ -40,31 +47,81 @@ function Echoes:NormalizeAndClampMainWindowToScreen()
 
     if f.GetPoint then
         local point, relTo, relPoint, xOfs, yOfs = f:GetPoint(1)
-        if point == "TOPLEFT" and relTo == UIParent and relPoint == "TOPLEFT" and xOfs and yOfs then
-            x, y = tonumber(xOfs), tonumber(yOfs)
+        local rel = relTo or UIParent
+        local rPoint = relPoint or point
+        if point == "TOPLEFT" and rel == UIParent and rPoint == "TOPLEFT" then
+            x, y = tonumber(xOfs) or 0, tonumber(yOfs) or 0
+        end
+
+        if not x or not y then
+            if point == "CENTER" and rel == UIParent and rPoint == "CENTER" and xOfs and yOfs and f.GetWidth and f.GetHeight then
+                local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+                local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+                if scale <= 0 then scale = 1 end
+                if parentScale <= 0 then parentScale = 1 end
+                local w = (f:GetWidth() or 0) * (scale / parentScale)
+                local h = (f:GetHeight() or 0) * (scale / parentScale)
+                x = tonumber(xOfs) - (w * 0.5)
+                y = tonumber(yOfs) - parentTop + (h * 0.5)
+            end
+        end
+
+        if not x or not y then
+            local topOfs, leftOfs
+            if point == "TOP" and rel == UIParent and rPoint == "BOTTOM" then
+                topOfs = tonumber(yOfs) or 0
+            elseif point == "LEFT" and rel == UIParent and rPoint == "LEFT" then
+                leftOfs = tonumber(xOfs) or 0
+            end
+
+            local point2, relTo2, relPoint2, xOfs2, yOfs2 = f:GetPoint(2)
+            if point2 then
+                local rel2 = relTo2 or UIParent
+                local rPoint2 = relPoint2 or point2
+                if point2 == "TOP" and rel2 == UIParent and rPoint2 == "BOTTOM" then
+                    topOfs = tonumber(yOfs2) or 0
+                elseif point2 == "LEFT" and rel2 == UIParent and rPoint2 == "LEFT" then
+                    leftOfs = tonumber(xOfs2) or 0
+                end
+            end
+
+            if topOfs and leftOfs and UIParent.GetHeight then
+                local parentH = UIParent:GetHeight() or 0
+                x, y = leftOfs, topOfs - parentTop
+            end
         end
     end
 
-    -- Fallback: compute from screen position.
-    if (not x or not y) and f.GetLeft and f.GetTop then
-        local left = f:GetLeft()
-        local top = f:GetTop()
-        if left and top then
-            x = left
-            y = top - parentH
+    -- Fallback: compute from center position (scale-aware).
+    if (not x or not y) and f.GetCenter and f.GetWidth and f.GetHeight and f.GetEffectiveScale and UIParent.GetEffectiveScale then
+        local cx, cy = f:GetCenter()
+        if cx and cy then
+            local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+            local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+            if scale <= 0 then scale = 1 end
+            if parentScale <= 0 then parentScale = 1 end
+            local w = (f:GetWidth() or 0) * (scale / parentScale)
+            local h = (f:GetHeight() or 0) * (scale / parentScale)
+            x = cx - (w * 0.5)
+            y = (cy + (h * 0.5)) - parentTop
         end
     end
 
     if not x or not y then return end
 
-    local w = (f:GetWidth() or 0)
-    local h = (f:GetHeight() or 0)
+    local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
+    local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
+    if scale <= 0 then scale = 1 end
+    if parentScale <= 0 then parentScale = 1 end
+
+    local w = (f:GetWidth() or 0) * (scale / parentScale)
+    local h = (f:GetHeight() or 0) * (scale / parentScale)
 
     local margin = 0
 
     if w <= 0 or h <= 0 or w > parentW or h > parentH then
         f:ClearAllPoints()
-        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
         return
     end
 

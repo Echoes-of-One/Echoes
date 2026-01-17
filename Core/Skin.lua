@@ -292,6 +292,7 @@ local function SkinMainFrame(widget)
         f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 400, -200)
     end
 
+
     if f.SetFrameStrata then
         f:SetFrameStrata("LOW")
     end
@@ -399,21 +400,8 @@ local function SkinMainFrame(widget)
         dr:SetScript("OnDragStop", function()
             if Echoes_IsFrameLocked() then return end
             if f.StopMovingOrSizing then f:StopMovingOrSizing() end
-
-            -- Normalize anchoring after dragging.
-            -- WoW may leave the frame anchored by CENTER/other points after StartMoving,
-            -- which makes later resizes (tab switches) appear to "move" the window.
-            -- Re-anchor to TOPLEFT at the current screen position without clamping/saving.
-            if f and UIParent and f.GetLeft and f.GetTop and f.ClearAllPoints and f.SetPoint and UIParent.GetHeight then
-                local left = f:GetLeft()
-                local top = f:GetTop()
-                local parentH = UIParent:GetHeight() or 0
-                if left and top and parentH > 0 then
-                    local x = math.floor(left + 0.5)
-                    local y = math.floor((top - parentH) + 0.5)
-                    f:ClearAllPoints()
-                    f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", x, y)
-                end
+            if Echoes and Echoes.UpdatePositionEdits then
+                Echoes:UpdatePositionEdits()
             end
         end)
 
@@ -516,6 +504,17 @@ local function SkinMainFrame(widget)
         widget.titletext:SetPoint("CENTER", f.EchoesTitleBar, "CENTER", 0, 0)
         widget.titletext:SetTextColor(0.95, 0.95, 0.95, 1)
         SetEchoesFont(widget.titletext, 15, ECHOES_FONT_FLAGS)
+
+        -- Disable AceGUI's default title drag handling so only our custom title bar
+        -- can move the window (prevents hidden anchor/status changes).
+        local titleFrame = widget.titletext.GetParent and widget.titletext:GetParent()
+        if titleFrame then
+            if titleFrame.EnableMouse then titleFrame:EnableMouse(false) end
+            if titleFrame.SetScript then
+                titleFrame:SetScript("OnMouseDown", nil)
+                titleFrame:SetScript("OnMouseUp", nil)
+            end
+        end
     end
 
     if widget.statusbg then

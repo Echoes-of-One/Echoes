@@ -72,32 +72,88 @@ end
 local function Echoes_GetTopLeftOffsetsInUIParent(f)
     if not f or not UIParent then return nil, nil end
 
+    local parentLeft = (UIParent.GetLeft and UIParent:GetLeft())
+    local parentTop = (UIParent.GetTop and UIParent:GetTop())
+    if parentLeft == nil then
+        parentLeft = 0
+    end
+    if parentTop == nil then
+        parentTop = (UIParent.GetHeight and UIParent:GetHeight()) or 0
+    end
+
     if f.GetPoint then
         local point, relTo, relPoint, xOfs, yOfs = f:GetPoint(1)
-        if point == "TOPLEFT" and relTo == UIParent and xOfs and yOfs then
-            if relPoint == "TOPLEFT" then
-                return tonumber(xOfs), tonumber(yOfs)
+        local rel = relTo or UIParent
+        local rPoint = relPoint or point
+        if point == "TOPLEFT" and rel == UIParent then
+            if rPoint == "TOPLEFT" then
+                return tonumber(xOfs) or 0, tonumber(yOfs) or 0
             end
-            if relPoint == "BOTTOMLEFT" and UIParent.GetHeight then
-                local parentH = UIParent:GetHeight() or 0
-                return tonumber(xOfs), (tonumber(yOfs) or 0) - parentH
+            if rPoint == "BOTTOMLEFT" then
+                return tonumber(xOfs) or 0, (tonumber(yOfs) or 0) - parentTop
             end
+        end
+
+        if point == "CENTER" and rel == UIParent and rPoint == "CENTER" and xOfs and yOfs and f.GetWidth and f.GetHeight then
+            local scale = f:GetEffectiveScale() or 1
+            local parentScale = UIParent:GetEffectiveScale() or 1
+            if scale <= 0 then scale = 1 end
+            if parentScale <= 0 then parentScale = 1 end
+            local w = (f:GetWidth() or 0) * (scale / parentScale)
+            local h = (f:GetHeight() or 0) * (scale / parentScale)
+            return tonumber(xOfs) - (w * 0.5), tonumber(yOfs) - parentTop + (h * 0.5)
+        end
+
+        -- Support AceGUI-style anchors (TOP to BOTTOM, LEFT to LEFT).
+        local topOfs, leftOfs
+        if point == "TOP" and rel == UIParent and rPoint == "BOTTOM" then
+            topOfs = tonumber(yOfs) or 0
+        elseif point == "LEFT" and rel == UIParent and rPoint == "LEFT" then
+            leftOfs = tonumber(xOfs) or 0
+        end
+
+        local point2, relTo2, relPoint2, xOfs2, yOfs2 = f:GetPoint(2)
+        if point2 then
+            local rel2 = relTo2 or UIParent
+            local rPoint2 = relPoint2 or point2
+            if point2 == "TOP" and rel2 == UIParent and rPoint2 == "BOTTOM" then
+                topOfs = tonumber(yOfs2) or 0
+            elseif point2 == "LEFT" and rel2 == UIParent and rPoint2 == "LEFT" then
+                leftOfs = tonumber(xOfs2) or 0
+            end
+        end
+
+        if topOfs and leftOfs then
+            return leftOfs, topOfs - parentTop
         end
     end
 
-    if not (f.GetLeft and f.GetTop and f.GetEffectiveScale and UIParent.GetEffectiveScale and UIParent.GetHeight) then
+    if f.GetLeft and f.GetTop then
+        local left = f:GetLeft()
+        local top = f:GetTop()
+        if left and top then
+            return left - parentLeft, top - parentTop
+        end
+    end
+
+    if not (f.GetCenter and f.GetWidth and f.GetHeight and f.GetEffectiveScale and UIParent.GetEffectiveScale and UIParent.GetHeight) then
         return nil, nil
     end
 
-    local left = f:GetLeft()
-    local top = f:GetTop()
-    if not left or not top then return nil, nil end
+    local cx, cy = f:GetCenter()
+    if not cx or not cy then return nil, nil end
+
+    local scale = f:GetEffectiveScale() or 1
+    local parentScale = UIParent:GetEffectiveScale() or 1
+    if scale <= 0 then scale = 1 end
+    if parentScale <= 0 then parentScale = 1 end
 
     local parentH = UIParent:GetHeight() or 0
-    -- Fallback: compute from current screen position.
-    -- GetLeft/GetTop are already in UIParent coordinate space for our purposes.
-    local x = left
-    local y = top - parentH
+    local w = (f:GetWidth() or 0) * (scale / parentScale)
+    local h = (f:GetHeight() or 0) * (scale / parentScale)
+
+    local x = cx - (w * 0.5)
+    local y = (cy + (h * 0.5)) - parentH
     return x, y
 end
 
@@ -116,7 +172,6 @@ function Echoes:ApplyFrameSizeForTab(key)
     if not s then return end
 
     local native = frame.frame
-    local keepX, keepY = Echoes_GetTopLeftOffsetsInUIParent(native)
 
     local EchoesDB = _G.EchoesDB
     local scale = EchoesDB.uiScale or 1.0
@@ -140,10 +195,8 @@ function Echoes:ApplyFrameSizeForTab(key)
     frame:SetWidth(math.floor(w + 0.5))
     frame:SetHeight(math.floor(h + 0.5))
 
-    -- Keep the top-left stable when switching tabs/resizing, but do not clamp or
-    -- persist here (dragging should not "snap back").
-    if keepX and keepY then
-        Echoes_SetTopLeftOffsetsInUIParent(native, keepX, keepY)
+    if self.UpdatePositionEdits then
+        self:UpdatePositionEdits()
     end
 end
 
@@ -156,8 +209,8 @@ function Echoes:ApplyScale()
         f:SetScale(EchoesDB.uiScale or 1.0)
     end
 
-    -- Re-apply sizing after scale changes so the current tab still fits.
-    self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
+    -- After any scale change, recenter like /echoes reset.
+    self:ResetMainWindowPosition()
 end
 
 ------------------------------------------------------------
@@ -259,6 +312,20 @@ function Echoes:CreateMainWindow()
     frame.frame:SetScale(EchoesDB.uiScale or 1.0)
     SkinMainFrame(frame)
 
+    -- Prevent AceGUI status handling from re-positioning the frame.
+    -- We manage position ourselves (drag stop + scale adjustments).
+    if frame.ApplyStatus and not frame._EchoesApplyStatusOverridden then
+        frame._EchoesApplyStatusOverridden = true
+        frame.ApplyStatus = function(self)
+            local status = self.status or self.localstatus
+            local curW = self.frame and self.frame.GetWidth and self.frame:GetWidth()
+            local curH = self.frame and self.frame.GetHeight and self.frame:GetHeight()
+            self:SetWidth(status.width or curW or 700)
+            self:SetHeight(status.height or curH or 500)
+            -- Intentionally do not change anchors here.
+        end
+    end
+
     local tabBar = AceGUI:Create("SimpleGroup")
     tabBar:SetFullWidth(true)
     tabBar:SetLayout("Fill")
@@ -329,7 +396,6 @@ function Echoes:ToggleMainWindow()
         f:Hide()
     else
         f:Show()
-        self:NormalizeAndClampMainWindowToScreen()
     end
 end
 
@@ -347,30 +413,20 @@ function Echoes:ResetMainWindowPosition()
 
     f:ClearAllPoints()
     f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-
-    if f.GetLeft and f.GetTop and UIParent then
-        local left = f:GetLeft()
-        local top = f:GetTop()
-        if left and top then
-            local scale = (f.GetEffectiveScale and f:GetEffectiveScale()) or 1
-            local parentScale = (UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()) or 1
-            if scale <= 0 then scale = 1 end
-            if parentScale <= 0 then parentScale = 1 end
-
-            local x = left * parentScale / scale
-            local y = top * parentScale / scale
-            f:ClearAllPoints()
-            f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-        end
+    if f.SetClampedToScreen then
+        f:SetClampedToScreen(false)
     end
 
     widget:Show()
 
     local EchoesDB = _G.EchoesDB
-    EchoesDB.mainWindowX = nil
-    EchoesDB.mainWindowY = nil
     self:ApplyFrameSizeForTab(EchoesDB.lastPanel or "BOT")
-    self:NormalizeAndClampMainWindowToScreen()
+    if self.UpdatePositionEdits then
+        self:UpdatePositionEdits()
+    end
+    if self.UpdateScaleEdit then
+        self:UpdateScaleEdit()
+    end
     Echoes_Print("Window reset to center.")
 end
 
@@ -404,30 +460,7 @@ function Echoes:ChatCommand(input)
         EchoesDB.uiScaleUserSet = true
         self:CreateMainWindow()
 
-        -- Preserve the current TOPLEFT, and force the anchor to TOPLEFT before scaling.
-        -- This makes the frame visually grow to the right/down.
-        local keepX, keepY
-        do
-            local widget = self.UI and self.UI.frame
-            local f = widget and widget.frame
-            keepX, keepY = Echoes_GetTopLeftOffsetsInUIParent(f)
-            if keepX and keepY then
-                Echoes_SetTopLeftOffsetsInUIParent(f, keepX, keepY)
-            end
-        end
-
         self:ApplyScale()
-
-        if keepX and keepY and self.RunAfter then
-            self:RunAfter(0.05, function()
-                local widget = self.UI and self.UI.frame
-                local f = widget and widget.frame
-                Echoes_SetTopLeftOffsetsInUIParent(f, keepX, keepY)
-                self:NormalizeAndClampMainWindowToScreen()
-            end)
-        else
-            self:NormalizeAndClampMainWindowToScreen()
-        end
 
         if self.UI and self.UI.scaleSlider and self.UI.scaleSlider.SetValue then
             self.UI.scaleSlider:SetValue(v)
