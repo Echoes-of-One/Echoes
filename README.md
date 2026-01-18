@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="https://i.gyazo.com/b857069092e8cd0f96b57d15d093d919.png" alt="Echoes" width="256" />
+</p>
+
 # Echoes
 
 Echoes is a lightweight **playerbot control helper** for **World of Warcraft 3.3.5 (WotLK)**.
 
-It provides an Ace3-based window (draggable, ElvUI-ish dark skin) with quick actions for common bot commands, plus basic group-setup helpers.
+It adds a clean, tabbed control panel (Ace3 UI) for common bot actions and group setup, plus a few quality-of-life tools like UI scaling and quick panels.
 
 ## Requirements
 
@@ -13,9 +17,17 @@ It provides an Ace3-based window (draggable, ElvUI-ish dark skin) with quick act
 
 ## Installation
 
+### Using an addon client
+
+If your addon page is connected to an auto-installer client:
+
+1. Search for **Echoes**.
+2. Click **Install** / **Update**.
+3. Launch the game (or `/reload`).
+
 ### From a release zip
 
-1. Download the latest `Echoes-<build>.zip` from GitHub Releases.
+1. Download the latest release zip from GitHub Releases.
 2. Extract into your WoW folder:
 
    `World of Warcraft/Interface/AddOns/`
@@ -32,11 +44,21 @@ This repository is already laid out like an addon folder.
 
 ## Usage
 
+### Quick start
+
+1. Type `/echoes` to open the window.
+2. Use the tabs at the top:
+   - **Bot Control**: common bot actions
+   - **Group Creation**: group templates and slot planning
+   - **Echoes**: UI scale and settings/tools
+
 ### Open / close the window
 
-- Slash commands:
-  - `/echoes`
-  - `/ech`
+Slash commands:
+
+- `/echoes` (main command)
+- `/ech` (short alias)
+- `/echoes help` (shows all commands)
 
 ### Minimap button
 
@@ -44,6 +66,16 @@ Echoes creates a minimap button labeled **"E"**.
 
 - Left-click: Toggle the Echoes window
 - Right-click + drag: Reposition the button around the minimap
+- Ctrl + click: Reset the window position to center
+
+## Commands
+
+- `/echoes` — Toggle the main window
+- `/echoes help` — Show help
+- `/echoes scale <0.5-2.0>` — Set UI scale
+- `/echoes reset` — Reset window position
+- `/echoes spec` — Toggle the spec whisper panel
+- `/echoes inv` — Open the inventory scan UI
 
 ## UI Overview
 
@@ -53,9 +85,11 @@ Echoes has three tabs:
 - **Group Creation**: Group template / slot helpers (some actions may be stubs/WIP).
 - **Echoes**: Misc settings (currently includes a **UI Scale** slider).
 
-## How commands are sent
+## How it works
 
-Echoes sends predefined command strings using `SendChatMessage(...)`.
+Echoes is built on Ace3 (embedded in the addon folder) and uses an AceGUI window for the main UI.
+
+For bot actions, Echoes sends predefined command strings using `SendChatMessage(...)`.
 
 - Default behavior sends to **PARTY**.
 - You can toggle **Send commands to a chat channel** and choose a **Channel** on the **Echoes** tab.
@@ -78,11 +112,17 @@ Echoes stores settings in `EchoesDB` (per-account SavedVariables), including:
 
 ### Releases
 
-This repo includes a GitHub Actions workflow that:
+This repo includes GitHub Actions workflows that:
 
-- Generates release notes from git history
-- Packages `Echoes/` and `Ace3/` into a zip
-- Creates a GitHub Release with that artifact
+- Read the addon version from `Echoes.VERSION` in `Bootstrap.lua`
+- Tag the commit as `vX.YY`
+- Package the addon into a zip with the correct folder layout (`Echoes/...`)
+- Publish a GitHub Release marked as the latest
+
+Release artifacts:
+
+- `Echoes-vX.YY.zip` (versioned)
+- `Echoes-latest.zip` (stable name, always replaced)
 
 See [.github/workflows/release.yml](.github/workflows/release.yml).
 
