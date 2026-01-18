@@ -405,7 +405,7 @@ local function EnsureTradeFrame(self)
     inTradeLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -6)
     inTradeLabel:SetTextColor(0.85, 0.85, 0.85, 1)
     SetEchoesFont(inTradeLabel, 11, ECHOES_FONT_FLAGS)
-    inTradeLabel:SetText("In Trade")
+    inTradeLabel:SetText("In Trade (Click to cancel)")
     inTradeLabel:Hide()
     f._EchoesInTradeLabel = inTradeLabel
 
@@ -482,119 +482,6 @@ local function GetTradeTargetOfferEntries()
     return list, offered
 end
 
-local function HookTradeItemButton(btn, side, index)
-    if not btn or btn._EchoesTradeLinkHooked or not btn.HookScript then return end
-    btn._EchoesTradeLinkHooked = true
-    btn._EchoesTradeSide = side
-    btn._EchoesTradeIndex = index
-
-    local function TryWhisperTradeLink(mouseButton)
-        if mouseButton ~= "RightButton" then return end
-        if not TradeFeaturesEnabled() then return end
-        if side ~= "target" then return end
-
-        local target = GetTradeTargetName()
-        if target == "" then return end
-
-        local link
-        if side == "player" and type(GetTradePlayerItemLink) == "function" then
-            link = GetTradePlayerItemLink(index)
-        elseif side == "target" and type(GetTradeTargetItemLink) == "function" then
-            link = GetTradeTargetItemLink(index)
-        end
-
-        if not link or link == "" then
-            local name
-            if side == "player" and type(GetTradePlayerItemInfo) == "function" then
-                name = select(1, GetTradePlayerItemInfo(index))
-            elseif side == "target" and type(GetTradeTargetItemInfo) == "function" then
-                name = select(1, GetTradeTargetItemInfo(index))
-            end
-            if name and name ~= "" then
-                link = "[" .. name .. "]"
-            end
-        end
-
-        if not link or link == "" then return end
-
-        if type(SendChatMessage) == "function" then
-            SendChatMessage(link, "WHISPER", nil, target)
-        end
-    end
-
-    if btn.HookScript then
-        if (not btn.HasScript) or btn:HasScript("OnClick") then
-            btn:HookScript("OnClick", function(selfBtn, mouseButton)
-                TryWhisperTradeLink(mouseButton)
-            end)
-        end
-        if (not btn.HasScript) or btn:HasScript("OnMouseUp") then
-            btn:HookScript("OnMouseUp", function(selfBtn, mouseButton)
-                TryWhisperTradeLink(mouseButton)
-            end)
-        end
-    end
-end
-
-local function HookTradeFrameButtons()
-    for i = 1, 7 do
-        local targetBtn = rawget(_G, "TradeFrameRecipientItemButton" .. tostring(i))
-        if not targetBtn then
-            targetBtn = rawget(_G, "TradeRecipientItemButton" .. tostring(i))
-        end
-        if not targetBtn then
-            targetBtn = rawget(_G, "TradeFrameTargetItemButton" .. tostring(i))
-        end
-        if not targetBtn then
-            targetBtn = rawget(_G, "TradeFrameRecipientItem" .. tostring(i))
-        end
-        if not targetBtn then
-            targetBtn = rawget(_G, "TradeRecipientItem" .. tostring(i))
-        end
-        if targetBtn then
-            HookTradeItemButton(targetBtn, "target", i)
-        end
-    end
-end
-
-local function HookTradeFrameFallbackClick()
-    if not (_G.TradeFrame and _G.TradeFrame.HookScript) then return end
-    if _G.TradeFrame._EchoesTradeFallbackHooked then return end
-    _G.TradeFrame._EchoesTradeFallbackHooked = true
-
-    _G.TradeFrame:HookScript("OnMouseUp", function(selfFrame, mouseButton)
-        if mouseButton ~= "RightButton" then return end
-        if not TradeFeaturesEnabled() then return end
-
-        local focus = (type(GetMouseFocus) == "function") and GetMouseFocus() or nil
-        if not focus or not focus.GetName then return end
-        local name = focus:GetName() or ""
-        if name == "" then return end
-
-        if not (name:find("TradeRecipientItem", 1, true) or name:find("TradeFrameRecipientItem", 1, true) or name:find("TradeFrameTargetItem", 1, true)) then
-            return
-        end
-
-        local idx = tonumber(name:match("(%d+)$"))
-        if not idx or idx < 1 or idx > 7 then return end
-
-        local target = GetTradeTargetName()
-        if target == "" then return end
-
-        local link = (type(GetTradeTargetItemLink) == "function") and GetTradeTargetItemLink(idx) or nil
-        if not link or link == "" then
-            local nameText = (type(GetTradeTargetItemInfo) == "function") and select(1, GetTradeTargetItemInfo(idx)) or nil
-            if nameText and nameText ~= "" then
-                link = "[" .. nameText .. "]"
-            end
-        end
-        if not link or link == "" then return end
-
-        if type(SendChatMessage) == "function" then
-            SendChatMessage(link, "WHISPER", nil, target)
-        end
-    end)
-end
 
 local function EnsureInvBar(self)
     EnsureInvState(self)
@@ -1493,8 +1380,6 @@ function Echoes:Trade_OnShow()
         return
     end
 
-    HookTradeFrameButtons()
-    HookTradeFrameFallbackClick()
 
     self.Trade.activeName = target
     self.Trade.byName[target] = { items = {}, _agg = {}, _received = false }
