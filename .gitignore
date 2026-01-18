@@ -1,0 +1,5 @@
+# Build / packaging artifacts
+/dist/
+
+# Release zips created by CI or local packaging
+Echoes-*.zip
