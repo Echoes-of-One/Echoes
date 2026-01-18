@@ -12,6 +12,7 @@ local Echoes_Print = Echoes.Print
 local Echoes_IsNameInGroup = Echoes.IsNameInGroup
 local SendCmdKey = Echoes.SendCmdKey
 local GetSelectedClass = Echoes.GetSelectedClass
+local NormalizeName = Echoes.NormalizeName
 
 ------------------------------------------------------------
 -- Bot Control tab
@@ -454,7 +455,61 @@ function Echoes:BuildBotTab(container)
         end
     end
 
-    local addRemGroup = MakeTwoButtonRow(topBlock, ROW_H, BTN_FONT, "Add", DoAddClass, "Remove All", "REMOVE_ALL")
+    local function GetKickTargets()
+        local names = {}
+        local seen = {}
+
+        local me = ""
+        if type(UnitName) == "function" then
+            me = NormalizeName(UnitName("player"))
+        end
+
+        local function add(name)
+            local norm = NormalizeName(name)
+            if norm == "" or norm == me or seen[norm] then return end
+            seen[norm] = true
+            names[#names + 1] = norm
+        end
+
+        if type(GetNumRaidMembers) == "function" and type(GetRaidRosterInfo) == "function" then
+            local nRaid = GetNumRaidMembers() or 0
+            if nRaid > 0 then
+                for i = 1, nRaid do
+                    local rn = GetRaidRosterInfo(i)
+                    add(rn)
+                end
+                return names
+            end
+        end
+
+        if type(GetNumPartyMembers) == "function" then
+            local nParty = GetNumPartyMembers() or 0
+            if nParty > 0 and type(UnitName) == "function" then
+                for i = 1, math.min(4, nParty) do
+                    local unit = "party" .. i
+                    add(UnitName(unit))
+                end
+            end
+        end
+
+        return names
+    end
+
+    local function DoRemoveAll()
+        local targets = GetKickTargets()
+        if #targets == 0 then
+            Echoes_Print("Echoes: not in a party or raid")
+            return
+        end
+
+        local actions = {}
+        for _, name in ipairs(targets) do
+            actions[#actions + 1] = { kind = "kick", name = name }
+        end
+        self:RunActionQueue(actions, 0.35)
+    end
+
+    local addRemGroup = MakeTwoButtonRow(topBlock, ROW_H, BTN_FONT, "Add", DoAddClass, "Remove All", DoRemoveAll)
     AnchorTightRow(addRemGroup, 0)
 
     ------------------------------------------------

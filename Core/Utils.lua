@@ -338,6 +338,10 @@ function Echoes:RunActionQueue(actions, interval, onDone)
         f:Hide()
         f:SetScript("OnUpdate", function(_, elapsed)
             if Echoes._EchoesWaitHelloActive then
+                local nextAction = Echoes._EchoesActionQueue and Echoes._EchoesActionQueue[1]
+                if nextAction and nextAction.kind == "kick" then
+                    -- Kicks don't need to wait for Hello responses.
+                else
                 local now = (type(GetTime) == "function" and GetTime()) or 0
                 local deadline = Echoes._EchoesWaitHelloDeadline or 0
                 local name = Echoes._EchoesWaitHelloName
@@ -361,6 +365,7 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                 end
 
                 return
+                end
             end
 
             if not Echoes._EchoesActionQueue or #Echoes._EchoesActionQueue == 0 then
@@ -426,6 +431,15 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                     Echoes._EchoesWaitHelloPlan = (type(a.plan) == "table") and a.plan or nil
                     Echoes._EchoesWaitHelloPostInviteTimeout = tonumber(a.postInviteTimeout) or 2.0
                     Echoes._EchoesWaitHelloDeadline = now + timeout
+                end
+            elseif a.kind == "kick" then
+                if a.name and a.name ~= "" then
+                    if type(SendChatMessage) == "function" then
+                        SendChatMessage("logout", "WHISPER", nil, a.name)
+                    end
+                    if type(UninviteUnit) == "function" then
+                        UninviteUnit(a.name)
+                    end
                 end
             end
         end)
