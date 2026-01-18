@@ -1384,6 +1384,9 @@ function Echoes:Trade_OnShow()
     self.Trade.activeName = target
     self.Trade.byName[target] = { items = {}, _agg = {}, _received = false }
 
+    local now = (type(GetTime) == "function" and GetTime()) or 0
+    self.Trade.byName[target]._acceptInvUntil = now + 2
+
     local f = EnsureTradeFrame(self)
     if f and _G.TradeFrame then
         f:ClearAllPoints()
@@ -1393,6 +1396,10 @@ function Echoes:Trade_OnShow()
 
     if self.Trade_ShowItems then
         self:Trade_ShowItems(target)
+    end
+
+    if type(SendChatMessage) == "function" then
+        SendChatMessage("items", "WHISPER", nil, target)
     end
 end
 
@@ -1595,10 +1602,6 @@ function Echoes:Trade_ShowItems(ownerName)
                 if type(SendChatMessage) == "function" then
                     SendChatMessage(payload, "WHISPER", nil, target)
                 end
-
-                if Echoes and Echoes.Trade_ClearItems then
-                    Echoes:Trade_ClearItems(target)
-                end
             end)
         end
 
@@ -1762,6 +1765,15 @@ function Echoes:Trade_OnWhisper(msg, author)
         self.Trade.byName[target] = rec
     else
         rec._received = true
+    end
+
+    local now = (type(GetTime) == "function" and GetTime()) or 0
+    local acceptUntil = tonumber(rec._acceptInvUntil) or 0
+    if now > acceptUntil then
+        if IsInventoryHeaderLine(msg) then return end
+        if tostring(msg or ""):lower():match("^items") then return end
+        local invItems = ParseItemsFromInventoryLine(msg)
+        if invItems and #invItems > 0 then return end
     end
 
     if tostring(msg or ""):find("Equipping", 1, true) then return end

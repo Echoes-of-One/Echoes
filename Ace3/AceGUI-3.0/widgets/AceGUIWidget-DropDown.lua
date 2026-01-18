@@ -11,6 +11,38 @@ local PlaySound = PlaySound
 local UIParent, CreateFrame = UIParent, CreateFrame
 local _G = _G
 
+local function Echoes_ShouldUsePrivateDropdownTemplate()
+	local addon = rawget(_G, "Echoes")
+	return addon and addon.UsePrivateDropdownTemplate
+end
+
+local function Echoes_CreatePrivateDropdownFrame(name, parent)
+	local dropdown = CreateFrame("Frame", name, parent)
+
+	local left = dropdown:CreateTexture(name .. "Left", "ARTWORK")
+	local middle = dropdown:CreateTexture(name .. "Middle", "ARTWORK")
+	local right = dropdown:CreateTexture(name .. "Right", "ARTWORK")
+
+	left:SetPoint("LEFT", dropdown, "LEFT", 0, 0)
+	left:SetSize(25, 64)
+
+	right:SetPoint("RIGHT", dropdown, "RIGHT", 0, 0)
+	right:SetSize(25, 64)
+
+	middle:SetPoint("LEFT", left, "RIGHT", 0, 0)
+	middle:SetPoint("RIGHT", right, "LEFT", 0, 0)
+	middle:SetHeight(64)
+
+	local text = dropdown:CreateFontString(name .. "Text", "OVERLAY", "GameFontHighlightSmall")
+	text:SetJustifyH("LEFT")
+
+	local button = CreateFrame("Button", name .. "Button", dropdown)
+	button:SetSize(24, 24)
+	button:SetPoint("RIGHT", dropdown, "RIGHT", -16, 0)
+
+	return dropdown
+end
+
 -- Global vars/functions that we don't upvalue since they might get hooked, or upgraded
 -- List them here for Mikk's FindGlobals script
 -- GLOBALS: CLOSE
@@ -628,7 +660,12 @@ do
 	local function Constructor()
 		local count = AceGUI:GetNextWidgetNum(widgetType)
 		local frame = CreateFrame("Frame", nil, UIParent)
-		local dropdown = CreateFrame("Frame", "AceGUI30DropDown"..count, frame, "UIDropDownMenuTemplate")
+		local dropdown
+		if Echoes_ShouldUsePrivateDropdownTemplate() then
+			dropdown = Echoes_CreatePrivateDropdownFrame("AceGUI30DropDown"..count, frame)
+		else
+			dropdown = CreateFrame("Frame", "AceGUI30DropDown"..count, frame, "UIDropDownMenuTemplate")
+		end
 		
 		local self = {}
 		self.type = widgetType

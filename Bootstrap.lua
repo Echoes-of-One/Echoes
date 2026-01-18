@@ -11,6 +11,10 @@ local Echoes = AceAddon:NewAddon("Echoes", "AceConsole-3.0", "AceEvent-3.0", "Ac
 -- CI reads this value to create the release tag (vX.YY) and package the zip.
 Echoes.VERSION = Echoes.VERSION or "0.12"
 
+-- Prefer a private dropdown template to avoid other UI packs (e.g., ElvUI)
+-- overwriting Blizzard's default dropdown visuals.
+Echoes.UsePrivateDropdownTemplate = true
+
 -- Backwards-compatible globals.
 _G.Echoes = Echoes
 _G.EchoesDB = _G.EchoesDB or {}
