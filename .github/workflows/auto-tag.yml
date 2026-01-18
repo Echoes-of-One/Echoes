@@ -27,8 +27,8 @@ jobs:
           git fetch --tags --force
 
           # Read the version from the addon code (single source of truth).
-          # Expected: Echoes.VERSION = "0.12" in Bootstrap.lua
-          VERSION=$(grep -Eo 'Echoes\.VERSION[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+"' Bootstrap.lua | head -n 1 | sed -E 's/.*"([0-9]+\.[0-9]+)"/\1/')
+          # Supports e.g. `Echoes.VERSION = "0.12"` or `Echoes.VERSION = Echoes.VERSION or "0.12"`.
+          VERSION=$(sed -nE 's/.*Echoes\.VERSION.*"([0-9]+\.[0-9]+)".*/\1/p' Bootstrap.lua | head -n 1)
           if [ -z "${VERSION}" ]; then
             echo "Could not read Echoes.VERSION from Bootstrap.lua" >&2
             exit 1
