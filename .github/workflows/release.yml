@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'V*'
+      - 'v*'
 
 permissions:
   contents: write
@@ -27,9 +27,20 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
+          # Validate tag matches the version defined in the addon code.
+          VERSION=$(grep -Eo 'Echoes\.VERSION\s*=\s*"[0-9]+\.[0-9]+"' Bootstrap.lua | head -n 1 | sed -E 's/.*"([0-9]+\.[0-9]+)"/\1/')
+          if [ -z "${VERSION}" ]; then
+            echo "Could not read Echoes.VERSION from Bootstrap.lua" >&2
+            exit 1
+          fi
+          if [ "${TAG}" != "v${VERSION}" ]; then
+            echo "Tag '${TAG}' does not match Echoes.VERSION 'v${VERSION}'" >&2
+            exit 1
+          fi
+
           PREV_TAG=""
-          if git describe --tags --abbrev=0 --match 'V*' "${TAG}^" >/dev/null 2>&1; then
-            PREV_TAG=$(git describe --tags --abbrev=0 --match 'V*' "${TAG}^")
+          if git describe --tags --abbrev=0 --match 'v*' "${TAG}^" >/dev/null 2>&1; then
+            PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^")
           fi
 
           if [ -n "$PREV_TAG" ]; then
@@ -63,17 +74,20 @@ jobs:
           rm -rf dist
           mkdir -p dist/Echoes
 
-          cp Echoes.lua dist/Echoes/
-          cp Echoes.toc dist/Echoes/
-
-          if [ ! -d "Ace3" ]; then
-            echo "ERROR: Expected an 'Ace3' folder inside the Echoes addon (./Ace3), but it was not found." >&2
-            echo "Echoes is packaged as a single standalone addon folder and requires ./Ace3 to be present." >&2
-            exit 1
+          # Stage the full addon folder so the zip contains Interface/AddOns/Echoes/*.
+          # Exclude repo-only folders.
+          if command -v rsync >/dev/null 2>&1; then
+            rsync -a --delete --exclude '.git' --exclude '.github' --exclude 'dist' ./ dist/Echoes/
+          else
+            # Fallback if rsync is unavailable.
+            shopt -s dotglob
+            for p in * .*; do
+              case "$p" in
+                .|..|.git|.github|dist) continue;;
+              esac
+              cp -R "$p" dist/Echoes/
+            done
           fi
-
-          # Embed Ace3 inside Echoes so the release zip only needs Interface/AddOns/Echoes.
-          cp -R Ace3 dist/Echoes/
 
           (cd dist && zip -r "../Echoes-${TAG}.zip" Echoes)
           cp "Echoes-${TAG}.zip" "Echoes-latest-${TAG}.zip"
