@@ -4,12 +4,17 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_run:
+    workflows: ["Auto Tag"]
+    types:
+      - completed
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
@@ -17,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       - name: Generate changelog
         id: changelog
@@ -24,11 +30,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          # Determine release tag.
+          # - push(tag): use the pushed tag name.
+          # - workflow_run(Auto Tag): derive tag from Echoes.VERSION at the triggering commit.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            VERSION=$(sed -nE 's/.*Echoes\.VERSION.*"([0-9]+\.[0-9]+)".*/\1/p' Bootstrap.lua | head -n 1)
+            if [ -z "${VERSION}" ]; then
+              echo "Could not read Echoes.VERSION from Bootstrap.lua" >&2
+              exit 1
+            fi
+            TAG="v${VERSION}"
+          fi
+
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           # Validate tag matches the version defined in the addon code.
-          # Supports e.g. `Echoes.VERSION = "0.12"` or `Echoes.VERSION = Echoes.VERSION or "0.12"`.
           VERSION=$(sed -nE 's/.*Echoes\.VERSION.*"([0-9]+\.[0-9]+)".*/\1/p' Bootstrap.lua | head -n 1)
           if [ -z "${VERSION}" ]; then
             echo "Could not read Echoes.VERSION from Bootstrap.lua" >&2
@@ -36,6 +54,13 @@ jobs:
           fi
           if [ "${TAG}" != "v${VERSION}" ]; then
             echo "Tag '${TAG}' does not match Echoes.VERSION 'v${VERSION}'" >&2
+            exit 1
+          fi
+
+          # Ensure the tag exists locally (important for workflow_run trigger).
+          git fetch --tags --force
+          if ! git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Expected tag '${TAG}' does not exist in repo" >&2
             exit 1
           fi
 
@@ -70,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ steps.changelog.outputs.tag }}"
 
           rm -rf dist
           mkdir -p dist/Echoes
@@ -98,7 +123,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ steps.changelog.outputs.tag }}"
 
           git fetch --tags --force
           git tag -f latest "${TAG}"
