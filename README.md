@@ -132,4 +132,5 @@ See [.github/workflows/release.yml](.github/workflows/release.yml).
 
 ## License
 
-No license file is currently included in this repository. If you want, I can add one (MIT/GPL/etc.) based on your preference.
+Licensed under **GPL-3.0-only**. See [LICENSE](LICENSE).
+
