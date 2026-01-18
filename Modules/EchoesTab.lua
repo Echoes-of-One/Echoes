@@ -5,6 +5,7 @@ local AceGUI = LibStub("AceGUI-3.0")
 local Clamp = Echoes.Clamp
 local SkinHeading = Echoes.SkinHeading
 local SkinLabel = Echoes.SkinLabel
+local SkinEditBox = Echoes.SkinEditBox
 
 local function Echoes_GetMainWindowTopLeftOffsetsInUIParent()
     local widget = Echoes.UI and Echoes.UI.frame
@@ -74,17 +75,12 @@ function Echoes:BuildEchoesTab(container)
     local EchoesDB = _G.EchoesDB
     container:SetLayout("List")
 
-    local heading = AceGUI:Create("Heading")
-    heading:SetText("Echoes")
-    heading:SetFullWidth(true)
-    SkinHeading(heading)
-    container:AddChild(heading)
-
-    local desc = AceGUI:Create("Label")
-    desc:SetText("Extra tools & settings for the Echoes control panel.")
-    desc:SetFullWidth(true)
-    SkinLabel(desc)
-    container:AddChild(desc)
+    local sliderTopPad = AceGUI:Create("SimpleGroup")
+    sliderTopPad:SetFullWidth(true)
+    sliderTopPad:SetLayout("Fill")
+    if sliderTopPad.SetAutoAdjustHeight then sliderTopPad:SetAutoAdjustHeight(false) end
+    sliderTopPad:SetHeight(15)
+    container:AddChild(sliderTopPad)
 
     local scaleSlider = AceGUI:Create("Slider")
     scaleSlider:SetLabel("UI Scale")
@@ -123,23 +119,64 @@ function Echoes:BuildEchoesTab(container)
     end)
     container:AddChild(scaleSlider)
 
+    local sliderPad = AceGUI:Create("SimpleGroup")
+    sliderPad:SetFullWidth(true)
+    sliderPad:SetLayout("Fill")
+    if sliderPad.SetAutoAdjustHeight then sliderPad:SetAutoAdjustHeight(false) end
+    sliderPad:SetHeight(10)
+    container:AddChild(sliderPad)
+
+    local tradeToggle = AceGUI:Create("CheckBox")
+    tradeToggle:SetLabel("Trade Features")
+    tradeToggle:SetValue(EchoesDB.tradeFeaturesEnabled ~= false)
+    tradeToggle:SetFullWidth(true)
+    tradeToggle:SetCallback("OnValueChanged", function(widget, event, value)
+        EchoesDB.tradeFeaturesEnabled = (value == true)
+        if not EchoesDB.tradeFeaturesEnabled then
+            if Echoes and Echoes.Trade_OnClosed then
+                Echoes:Trade_OnClosed()
+            end
+        elseif Echoes and Echoes.Trade_OnShow then
+            if _G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown() then
+                Echoes:Trade_OnShow()
+            end
+        end
+    end)
+    container:AddChild(tradeToggle)
+
     -- X / Y / Scale edit boxes (all on one row)
     local row = AceGUI:Create("SimpleGroup")
     row:SetFullWidth(true)
-    row:SetLayout("Flow")
+    row:SetLayout("None")
+    if row.SetAutoAdjustHeight then row:SetAutoAdjustHeight(false) end
+    row:SetHeight(28)
     container:AddChild(row)
 
-    local function CreateLabel(text)
+    local host = row.content or row.frame
+
+    local function CreateLabel(text, width)
         local lbl = AceGUI:Create("Label")
         lbl:SetText(text)
-        lbl:SetWidth(20)
+        lbl:SetWidth(width or 20)
         return lbl
     end
 
-    local function CreateEdit(defaultText)
+    local function CreateEdit(defaultText, width)
         local eb = AceGUI:Create("EditBox")
         eb:SetText(defaultText or "")
-        eb:SetWidth(90)
+        eb:SetWidth(width or 90)
+        if eb.DisableButton then
+            eb:DisableButton(true)
+        end
+        if eb.button and eb.button.Hide then
+            eb.button:Hide()
+        end
+        if eb.editbox and eb.editbox.SetTextInsets then
+            eb.editbox:SetTextInsets(0, 0, 3, 3)
+        end
+        if SkinEditBox then
+            SkinEditBox(eb)
+        end
         return eb
     end
 
@@ -147,8 +184,8 @@ function Echoes:BuildEchoesTab(container)
 
     local function UpdatePositionEdits()
         local x, y = Echoes_GetMainWindowTopLeftOffsetsInUIParent()
-        if xEd and xEd.SetText then xEd:SetText(string.format("%.1f", x or 0)) end
-        if yEd and yEd.SetText then yEd:SetText(string.format("%.1f", y or 0)) end
+        if xEd and xEd.SetText then xEd:SetText(string.format("%.0f", x or 0)) end
+        if yEd and yEd.SetText then yEd:SetText(string.format("%.0f", y or 0)) end
     end
 
     function Echoes:UpdatePositionEdits()
@@ -164,8 +201,9 @@ function Echoes:BuildEchoesTab(container)
         UpdateScaleEdit()
     end
 
-    row:AddChild(CreateLabel("X"))
-    xEd = CreateEdit("0")
+    local lblX = CreateLabel("X", 14)
+    row:AddChild(lblX)
+    xEd = CreateEdit("0", 56)
     xEd:SetCallback("OnEnterPressed", function(widget, event, value)
         local x = tonumber(value)
         if not x then return end
@@ -173,11 +211,15 @@ function Echoes:BuildEchoesTab(container)
         y = y or 0
         Echoes_SetMainWindowTopLeftOffsetsInUIParent(x, y)
         UpdatePositionEdits()
+        if widget and widget.editbox and widget.editbox.ClearFocus then
+            widget.editbox:ClearFocus()
+        end
     end)
     row:AddChild(xEd)
 
-    row:AddChild(CreateLabel("Y"))
-    yEd = CreateEdit("0")
+    local lblY = CreateLabel("Y", 14)
+    row:AddChild(lblY)
+    yEd = CreateEdit("0", 56)
     yEd:SetCallback("OnEnterPressed", function(widget, event, value)
         local y = tonumber(value)
         if not y then return end
@@ -185,11 +227,15 @@ function Echoes:BuildEchoesTab(container)
         x = x or 0
         Echoes_SetMainWindowTopLeftOffsetsInUIParent(x, y)
         UpdatePositionEdits()
+        if widget and widget.editbox and widget.editbox.ClearFocus then
+            widget.editbox:ClearFocus()
+        end
     end)
     row:AddChild(yEd)
 
-    row:AddChild(CreateLabel("Scale"))
-    scaleEd = CreateEdit("1.00")
+    local lblScale = CreateLabel("Scale", 34)
+    row:AddChild(lblScale)
+    scaleEd = CreateEdit("1.00", 49)
     scaleEd:SetCallback("OnEnterPressed", function(widget, event, value)
         local v = tonumber(value)
         if not v then return end
@@ -201,8 +247,58 @@ function Echoes:BuildEchoesTab(container)
             scaleSlider:SetValue(v)
         end
         UpdateScaleEdit()
+        if widget and widget.editbox and widget.editbox.ClearFocus then
+            widget.editbox:ClearFocus()
+        end
     end)
     row:AddChild(scaleEd)
+
+    if host and host.SetPoint then
+        local function LayoutRow()
+            local w = host.GetWidth and host:GetWidth() or 0
+            if w <= 0 then return end
+
+            local total = lblX.frame:GetWidth() + 3
+                + xEd.frame:GetWidth() + 10
+                + lblY.frame:GetWidth() + 3
+                + yEd.frame:GetWidth() + 10
+                + lblScale.frame:GetWidth() + 3
+                + scaleEd.frame:GetWidth()
+
+            local x = math.floor((w - total) * 0.5 + 0.5)
+            if x < 0 then x = 0 end
+
+            lblX.frame:ClearAllPoints()
+            lblX.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+            x = x + lblX.frame:GetWidth() + 3
+
+            xEd.frame:ClearAllPoints()
+            xEd.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+            x = x + xEd.frame:GetWidth() + 10
+
+            lblY.frame:ClearAllPoints()
+            lblY.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+            x = x + lblY.frame:GetWidth() + 3
+
+            yEd.frame:ClearAllPoints()
+            yEd.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+            x = x + yEd.frame:GetWidth() + 10
+
+            lblScale.frame:ClearAllPoints()
+            lblScale.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+            x = x + lblScale.frame:GetWidth() + 3
+
+            scaleEd.frame:ClearAllPoints()
+            scaleEd.frame:SetPoint("LEFT", host, "LEFT", x, 0)
+        end
+
+        LayoutRow()
+        if host.HookScript and not host._EchoesRowCenteredHooked then
+            host._EchoesRowCenteredHooked = true
+            host:HookScript("OnShow", LayoutRow)
+            host:HookScript("OnSizeChanged", LayoutRow)
+        end
+    end
 
     UpdatePositionEdits()
     UpdateScaleEdit()

@@ -84,6 +84,24 @@ local function Echoes_ForceFontOnFontString(fs)
     SetEchoesFont(fs, tonumber(curSize) or 12, curFlags or ECHOES_FONT_FLAGS)
 end
 
+local function Echoes_EnableSelectionHighlight(editbox)
+    return
+end
+
+local function Echoes_ApplyDropdownItemColor(fs, info)
+    if not (fs and fs.SetTextColor and fs.GetTextColor) then return end
+
+    if info and info.colorCode and type(info.colorCode) == "string" then
+        -- Respect explicit color codes; do not override.
+        return
+    end
+
+    local _, _, _, a = fs:GetTextColor()
+    if a and a > 0.2 then return end
+
+    fs:SetTextColor(0.90, 0.85, 0.70, 1)
+end
+
 -- Global dropdown menu guard (scoped): only affects menus opened by Echoes-owned dropdowns.
 -- This protects BOTH the selected-value text and the popup list item text from late skin passes.
 local function Echoes_InstallDropdownFontGuards()
@@ -108,6 +126,7 @@ local function Echoes_InstallDropdownFontGuards()
 
             local fs = (btn.GetFontString and btn:GetFontString()) or rawget(_G, btn:GetName() .. "NormalText")
             Echoes_ForceFontOnFontString(fs)
+            Echoes_ApplyDropdownItemColor(fs, info)
         end)
     end
 
@@ -125,6 +144,7 @@ local function Echoes_InstallDropdownFontGuards()
                     if btn then
                         local fs = (btn.GetFontString and btn:GetFontString()) or rawget(_G, btn:GetName() .. "NormalText")
                         Echoes_ForceFontOnFontString(fs)
+                        Echoes_ApplyDropdownItemColor(fs, nil)
                     end
                 end
             end)
@@ -1391,34 +1411,35 @@ local function SkinDropdown(widget)
         return nil
     end
 
-    local function ApplyEchoesGroupSlotSelectedColor()
+    local function ApplyEchoesGroupSlotSelectedColor(targetText)
+        local target = targetText or widget.text
         if not widget.dropdown or widget.dropdown._EchoesDropdownKind ~= "groupSlot" then return end
 
         if widget.dropdown._EchoesFilledClassFile then
             local colors = rawget(_G, "RAID_CLASS_COLORS")
             local c = colors and colors[widget.dropdown._EchoesFilledClassFile]
-            if c and widget.text and widget.text.SetTextColor then
-                widget.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+            if c and target and target.SetTextColor then
+                target:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
                 return
             end
         end
 
         if widget.dropdown._EchoesForceDisabledGrey then
-            if widget.text and widget.text.SetTextColor then
-                widget.text:SetTextColor(0.55, 0.55, 0.55, 1)
+            if target and target.SetTextColor then
+                target:SetTextColor(0.55, 0.55, 0.55, 1)
             end
             return
         end
 
-        if widget.text and widget.text.GetText and widget.text.SetTextColor then
-            local rawText = widget.text:GetText()
+        if target and target.GetText and target.SetTextColor then
+            local rawText = target:GetText()
             local stripped = StripColorCodes(rawText)
             local t = tostring(stripped or "")
             t = t:lower():gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 
             -- Group slot dropdown wants "None" to remain visibly grey.
             if t == "none" or t == "" then
-                widget.text:SetTextColor(0.60, 0.60, 0.60, 1)
+                target:SetTextColor(0.60, 0.60, 0.60, 1)
                 return
             end
 
@@ -1426,9 +1447,9 @@ local function SkinDropdown(widget)
             local colors = rawget(_G, "RAID_CLASS_COLORS")
             local c = classFile and colors and colors[classFile]
             if c then
-                widget.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+                target:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
             else
-                widget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+                target:SetTextColor(0.90, 0.85, 0.70, 1)
             end
         end
     end
@@ -1508,8 +1529,36 @@ local function SkinDropdown(widget)
         sepTex = box._EchoesDropSep
     end
 
+    local function EnsurePrivateDropdownText()
+        if not box or not box.CreateFontString then return nil end
+        if box._EchoesPrivateText then return box._EchoesPrivateText end
+
+        local fs = box:CreateFontString(nil, "OVERLAY")
+        fs:SetJustifyH("LEFT")
+        fs:SetJustifyV("MIDDLE")
+        box._EchoesPrivateText = fs
+        return fs
+    end
+
     local function ReapplyEchoesDropdownFont()
         local preserveTextColor = (widget and widget._EchoesPreserveTextColor) or (widget.dropdown and widget.dropdown._EchoesPreserveTextColor)
+        local rawText = widget.text and widget.text.GetText and widget.text:GetText() or ""
+
+        local fs = EnsurePrivateDropdownText()
+        if fs then
+            SetEchoesFont(fs, 10, ECHOES_FONT_FLAGS)
+            fs:SetText(tostring(rawText or ""))
+            if not preserveTextColor then
+                fs:SetTextColor(0.90, 0.85, 0.70, 1)
+            elseif widget.text and widget.text.GetTextColor then
+                local r, g, b, a = widget.text:GetTextColor()
+                if r and g and b then
+                    fs:SetTextColor(r, g, b, a or 1)
+                end
+            end
+            ApplyEchoesGroupSlotSelectedColor(fs)
+        end
+
         if not preserveTextColor and widget.text and widget.text.SetTextColor then
             widget.text:SetTextColor(0.90, 0.85, 0.70, 1)
         end
@@ -1547,6 +1596,21 @@ local function SkinDropdown(widget)
         end
         if widget.text.SetJustifyH then
             widget.text:SetJustifyH("LEFT")
+        end
+        if widget.text.SetAlpha then
+            widget.text:SetAlpha(0)
+        end
+        local fs = EnsurePrivateDropdownText()
+        if fs then
+            fs:ClearAllPoints()
+            fs:SetPoint("LEFT", box, "LEFT", 8, 0)
+            if sepTex then
+                fs:SetPoint("RIGHT", sepTex, "LEFT", -6, 0)
+            elseif widget.button then
+                fs:SetPoint("RIGHT", widget.button, "LEFT", -6, 0)
+            else
+                fs:SetPoint("RIGHT", box, "RIGHT", -8, 0)
+            end
         end
         ReapplyEchoesDropdownFont()
     end
@@ -1591,9 +1655,7 @@ SkinEditBox = function(widget)
         widget.editbox:SetFont(ECHOES_FONT_PATH, 11, "")
     end
 
-    if widget.editbox.SetHighlightColor then
-        widget.editbox:SetHighlightColor(0.92, 0.92, 0.92, 0.45)
-    end
+
 
     if widget.label and widget.label.SetTextColor then
         widget.label:SetTextColor(0.9, 0.9, 0.9, 1)
@@ -1632,3 +1694,4 @@ Echoes.SkinEditBox = SkinEditBox
 Echoes.SkinHeading = SkinHeading
 Echoes.SkinLabel = SkinLabel
 Echoes.ForceFontFaceOnFrame = Echoes_ForceFontFaceOnFrame
+Echoes.EnableSelectionHighlight = Echoes_EnableSelectionHighlight

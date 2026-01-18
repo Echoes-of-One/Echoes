@@ -137,8 +137,14 @@ function Echoes:BuildBotTab(container)
         local c = cf and colors and colors[cf]
         if c then
             classDrop.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+            if classDrop.dropdown and classDrop.dropdown._EchoesPrivateText and classDrop.dropdown._EchoesPrivateText.SetTextColor then
+                classDrop.dropdown._EchoesPrivateText:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+            end
         else
             classDrop.text:SetTextColor(0.90, 0.85, 0.70, 1)
+            if classDrop.dropdown and classDrop.dropdown._EchoesPrivateText and classDrop.dropdown._EchoesPrivateText.SetTextColor then
+                classDrop.dropdown._EchoesPrivateText:SetTextColor(0.90, 0.85, 0.70, 1)
+            end
         end
     end
 
@@ -420,7 +426,7 @@ function Echoes:BuildBotTab(container)
         SendChatMessage(".playerbots bot addclass " .. c.cmd, "GUILD")
 
         -- If "Hello" bots aren't in group after 10s, re-attempt invites.
-        self:RunAfter(10.0, function()
+        local function ReinviteMissingHello()
             if sessionId ~= self._EchoesBotAddSessionId then return end
             self._EchoesBotAddSessionActive = false
 
@@ -436,7 +442,16 @@ function Echoes:BuildBotTab(container)
                 Echoes_Print("Re-inviting missing Hello bots...")
                 self:RunActionQueue(missing, 0.70)
             end
-        end)
+        end
+
+        if self.ScheduleTimer then
+            if self._EchoesBotAddReinviteTimer and self.CancelTimer then
+                self:CancelTimer(self._EchoesBotAddReinviteTimer, true)
+            end
+            self._EchoesBotAddReinviteTimer = self:ScheduleTimer(ReinviteMissingHello, 10.0)
+        else
+            self:RunAfter(10.0, ReinviteMissingHello)
+        end
     end
 
     local addRemGroup = MakeTwoButtonRow(topBlock, ROW_H, BTN_FONT, "Add", DoAddClass, "Remove All", "REMOVE_ALL")

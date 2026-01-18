@@ -30,6 +30,9 @@ function Echoes:EnsureDefaults()
     EchoesDB.invHideKeys        = (EchoesDB.invHideKeys ~= nil) and EchoesDB.invHideKeys or false
     EchoesDB.invCrateItem       = EchoesDB.invCrateItem or nil
 
+    -- Trade helpers
+    EchoesDB.tradeFeaturesEnabled = (EchoesDB.tradeFeaturesEnabled ~= nil) and EchoesDB.tradeFeaturesEnabled or true
+
     -- Main window movement lock (false = movable)
     EchoesDB.frameLocked        = (EchoesDB.frameLocked ~= nil) and EchoesDB.frameLocked or false
 

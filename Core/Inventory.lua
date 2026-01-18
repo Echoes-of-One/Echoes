@@ -11,18 +11,38 @@ local ECHOES_FONT_FLAGS = Echoes.ECHOES_FONT_FLAGS
 
 local CRATE_ITEM_FALLBACK_NAME = "Foror's Crate of Endless Resist Gear Storage"
 local CRATE_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_QuestionMark"
-local CLASS_ICON_TEXTURES = {
-    PALADIN = "Interface\\Icons\\ClassIcon_Paladin",
-    DEATHKNIGHT = "Interface\\Icons\\ClassIcon_DeathKnight",
-    WARRIOR = "Interface\\Icons\\ClassIcon_Warrior",
-    SHAMAN = "Interface\\Icons\\ClassIcon_Shaman",
-    HUNTER = "Interface\\Icons\\ClassIcon_Hunter",
-    DRUID = "Interface\\Icons\\ClassIcon_Druid",
-    ROGUE = "Interface\\Icons\\ClassIcon_Rogue",
-    PRIEST = "Interface\\Icons\\ClassIcon_Priest",
-    WARLOCK = "Interface\\Icons\\ClassIcon_Warlock",
-    MAGE = "Interface\\Icons\\ClassIcon_Mage",
+local CLASS_ICON_ATLAS = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local CLASS_ICON_COORDS = {
+    WARRIOR = { 0.00, 0.25, 0.00, 0.25 },
+    MAGE = { 0.25, 0.50, 0.00, 0.25 },
+    ROGUE = { 0.50, 0.75, 0.00, 0.25 },
+    DRUID = { 0.75, 1.00, 0.00, 0.25 },
+    HUNTER = { 0.00, 0.25, 0.25, 0.50 },
+    SHAMAN = { 0.25, 0.50, 0.25, 0.50 },
+    PRIEST = { 0.50, 0.75, 0.25, 0.50 },
+    WARLOCK = { 0.75, 1.00, 0.25, 0.50 },
+    PALADIN = { 0.00, 0.25, 0.50, 0.75 },
+    DEATHKNIGHT = { 0.25, 0.50, 0.50, 0.75 },
 }
+
+local TryResolveEntryInPlace
+local EntryKey
+
+local CLASS_NAME_TO_FILE = {}
+if _G.LOCALIZED_CLASS_NAMES_MALE then
+    for file, loc in pairs(_G.LOCALIZED_CLASS_NAMES_MALE) do
+        if loc and file then
+            CLASS_NAME_TO_FILE[loc] = file
+        end
+    end
+end
+if _G.LOCALIZED_CLASS_NAMES_FEMALE then
+    for file, loc in pairs(_G.LOCALIZED_CLASS_NAMES_FEMALE) do
+        if loc and file then
+            CLASS_NAME_TO_FILE[loc] = file
+        end
+    end
+end
 
 local function Trim(s)
     s = tostring(s or "")
@@ -123,6 +143,29 @@ local function IsAlwaysHiddenEntry(entry)
     return false
 end
 
+local function ParseSoldItemFromMessage(msg)
+    msg = Trim(msg)
+    if msg == "" then return nil end
+    if not msg:lower():match("^selling") then return nil end
+
+    local link = msg:match("(|c%x%x%x%x%x%x%x%x|Hitem:.-|h.-|h|r)")
+    if link then
+        local name = link:match("%[(.-)%]")
+        return { link = link, name = name }
+    end
+
+    local name = msg:match("^Selling%s+%[([^%]]+)%]")
+    if not name then
+        name = msg:match("^Selling%s+(.+)$")
+    end
+    name = Trim(name or "")
+    if name ~= "" then
+        return { name = name }
+    end
+
+    return nil
+end
+
 local function GetGroupMemberNames()
     local names = {}
 
@@ -132,11 +175,22 @@ local function GetGroupMemberNames()
     end
 
     local seen = {}
-    local function addMember(name, classFile)
+    local function ResolveClassFile(classFile, className)
+        if classFile and CLASS_ICON_COORDS[classFile] then
+            return classFile
+        end
+        if className and CLASS_NAME_TO_FILE[className] then
+            return CLASS_NAME_TO_FILE[className]
+        end
+        return classFile
+    end
+
+    local function addMember(name, classFile, className)
         if not name or name == "" then return end
         local norm = NormalizeName(name)
         if norm == "" or norm == me or seen[norm] then return end
         seen[norm] = true
+        classFile = ResolveClassFile(classFile, className)
         names[#names + 1] = {
             name = norm,
             classFile = classFile,
@@ -149,8 +203,8 @@ local function GetGroupMemberNames()
         local n = GetNumRaidMembers() or 0
         if n > 0 then
             for i = 1, n do
-                local name, _, _, _, _, classFile = GetRaidRosterInfo(i)
-                addMember(name, classFile)
+                local name, _, _, _, className, classFile = GetRaidRosterInfo(i)
+                addMember(name, classFile, className)
             end
             return names
         end
@@ -164,8 +218,8 @@ local function GetGroupMemberNames()
                 for i = 1, math.min(4, nParty) do
                     local unit = "party" .. i
                     local name = UnitName(unit)
-                    local _, classFile = type(UnitClass) == "function" and UnitClass(unit) or nil
-                    addMember(name, classFile)
+                    local className, classFile = type(UnitClass) == "function" and UnitClass(unit) or nil
+                    addMember(name, classFile, className)
                 end
             end
             return names
@@ -178,10 +232,12 @@ end
 
 local function GetClassIconTexture(classFile)
     if classFile and type(classFile) == "string" then
-        local tex = CLASS_ICON_TEXTURES[classFile]
-        if tex then return tex end
+        local coords = CLASS_ICON_COORDS[classFile]
+        if coords then
+            return CLASS_ICON_ATLAS, coords
+        end
     end
-    return GetCrateIconTexture()
+    return GetCrateIconTexture(), nil
 end
 
 local function IsSelf(name)
@@ -289,6 +345,255 @@ local function EnsureInvState(self)
     self.Inv.byName = self.Inv.byName or {}
     self.Inv.members = self.Inv.members or {}
     self.UI = self.UI or {}
+end
+
+local function EnsureTradeState(self)
+    self.Trade = self.Trade or {}
+    self.Trade.byName = self.Trade.byName or {}
+    self.UI = self.UI or {}
+end
+
+local function TradeFeaturesEnabled()
+    local EchoesDB = _G.EchoesDB
+    return not (EchoesDB and EchoesDB.tradeFeaturesEnabled == false)
+end
+
+local function GetTradeTargetName()
+    local name = nil
+    if _G.TradeFrameRecipientNameText and _G.TradeFrameRecipientNameText.GetText then
+        name = _G.TradeFrameRecipientNameText:GetText()
+    elseif _G.TradeFrameRecipientName and _G.TradeFrameRecipientName.GetText then
+        name = _G.TradeFrameRecipientName:GetText()
+    end
+    if (not name or name == "") and type(UnitName) == "function" then
+        name = UnitName("target")
+    end
+    return NormalizeName(name or "")
+end
+
+local function EnsureTradeFrame(self)
+    EnsureTradeState(self)
+
+    if self.UI.tradeFrame and self.UI.tradeFrame._EchoesIsTradeFrame then
+        return self.UI.tradeFrame
+    end
+
+    local f = CreateFrame("Frame", "EchoesTradeItemsFrame", UIParent)
+    f._EchoesIsTradeFrame = true
+    f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
+
+    f:SetSize(240, 180)
+    f:Hide()
+
+    SkinBackdrop(f, 0.92)
+
+    local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
+    close:SetScript("OnClick", function()
+        f:Hide()
+    end)
+
+    local title = f:CreateFontString(nil, "OVERLAY")
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -6)
+    title:SetTextColor(0.9, 0.8, 0.5, 1)
+    SetEchoesFont(title, 12, ECHOES_FONT_FLAGS)
+    title:SetText("Tradable Items")
+    f._EchoesTitle = title
+
+    local inTradeLabel = f:CreateFontString(nil, "OVERLAY")
+    inTradeLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -6)
+    inTradeLabel:SetTextColor(0.85, 0.85, 0.85, 1)
+    SetEchoesFont(inTradeLabel, 11, ECHOES_FONT_FLAGS)
+    inTradeLabel:SetText("In Trade")
+    inTradeLabel:Hide()
+    f._EchoesInTradeLabel = inTradeLabel
+
+    local empty = f:CreateFontString(nil, "OVERLAY")
+    empty:SetPoint("TOP", f, "TOP", 0, -40)
+    empty:SetTextColor(0.7, 0.7, 0.7, 1)
+    SetEchoesFont(empty, 11, ECHOES_FONT_FLAGS)
+    empty:SetText("Waiting for tradable items...")
+    f._EchoesEmptyText = empty
+
+    f._EchoesSlots = {}
+    f._EchoesInTradeSlots = {}
+
+    self.UI.tradeFrame = f
+    return f
+end
+
+local function UpdateTradeItemTooltip(btn)
+    if not btn then return end
+    local tooltip = rawget(_G, "GameTooltip")
+    if not tooltip then return end
+
+    tooltip:SetOwner(btn, "ANCHOR_RIGHT")
+    if tooltip.ClearLines then tooltip:ClearLines() end
+
+    if btn._EchoesItemLink and btn._EchoesItemLink ~= "" and tooltip.SetHyperlink then
+        tooltip:SetHyperlink(btn._EchoesItemLink)
+    else
+        tooltip:SetText(btn._EchoesItemName or "Item", 1, 1, 1)
+    end
+
+    tooltip:AddLine(" ")
+    tooltip:AddLine("Click: Whisper item link", 0.8, 0.8, 0.8)
+    tooltip:Show()
+end
+
+local function GetTradeTargetOfferEntries()
+    local offered = {}
+    local list = {}
+
+    if type(GetTradeTargetItemInfo) ~= "function" then
+        return list, offered
+    end
+
+    for i = 1, 7 do
+        local name, _, numItems = GetTradeTargetItemInfo(i)
+        local link = (type(GetTradeTargetItemLink) == "function") and GetTradeTargetItemLink(i) or nil
+        local count = tonumber(numItems) or 1
+
+        if (link and link ~= "") or (name and name ~= "") then
+            local entry = { link = link, name = name, count = math.max(1, count) }
+            TryResolveEntryInPlace(entry)
+            local key = EntryKey(entry)
+            if key then
+                local existing = offered[key]
+                if existing then
+                    existing.count = (tonumber(existing.count) or 0) + entry.count
+                else
+                    offered[key] = {
+                        itemId = entry.itemId,
+                        link = entry.link,
+                        name = entry.name,
+                        count = entry.count,
+                    }
+                end
+            end
+        end
+    end
+
+    for _, v in pairs(offered) do
+        list[#list + 1] = v
+    end
+
+    return list, offered
+end
+
+local function HookTradeItemButton(btn, side, index)
+    if not btn or btn._EchoesTradeLinkHooked or not btn.HookScript then return end
+    btn._EchoesTradeLinkHooked = true
+    btn._EchoesTradeSide = side
+    btn._EchoesTradeIndex = index
+
+    local function TryWhisperTradeLink(mouseButton)
+        if mouseButton ~= "RightButton" then return end
+        if not TradeFeaturesEnabled() then return end
+        if side ~= "target" then return end
+
+        local target = GetTradeTargetName()
+        if target == "" then return end
+
+        local link
+        if side == "player" and type(GetTradePlayerItemLink) == "function" then
+            link = GetTradePlayerItemLink(index)
+        elseif side == "target" and type(GetTradeTargetItemLink) == "function" then
+            link = GetTradeTargetItemLink(index)
+        end
+
+        if not link or link == "" then
+            local name
+            if side == "player" and type(GetTradePlayerItemInfo) == "function" then
+                name = select(1, GetTradePlayerItemInfo(index))
+            elseif side == "target" and type(GetTradeTargetItemInfo) == "function" then
+                name = select(1, GetTradeTargetItemInfo(index))
+            end
+            if name and name ~= "" then
+                link = "[" .. name .. "]"
+            end
+        end
+
+        if not link or link == "" then return end
+
+        if type(SendChatMessage) == "function" then
+            SendChatMessage(link, "WHISPER", nil, target)
+        end
+    end
+
+    if btn.HookScript then
+        if (not btn.HasScript) or btn:HasScript("OnClick") then
+            btn:HookScript("OnClick", function(selfBtn, mouseButton)
+                TryWhisperTradeLink(mouseButton)
+            end)
+        end
+        if (not btn.HasScript) or btn:HasScript("OnMouseUp") then
+            btn:HookScript("OnMouseUp", function(selfBtn, mouseButton)
+                TryWhisperTradeLink(mouseButton)
+            end)
+        end
+    end
+end
+
+local function HookTradeFrameButtons()
+    for i = 1, 7 do
+        local targetBtn = rawget(_G, "TradeFrameRecipientItemButton" .. tostring(i))
+        if not targetBtn then
+            targetBtn = rawget(_G, "TradeRecipientItemButton" .. tostring(i))
+        end
+        if not targetBtn then
+            targetBtn = rawget(_G, "TradeFrameTargetItemButton" .. tostring(i))
+        end
+        if not targetBtn then
+            targetBtn = rawget(_G, "TradeFrameRecipientItem" .. tostring(i))
+        end
+        if not targetBtn then
+            targetBtn = rawget(_G, "TradeRecipientItem" .. tostring(i))
+        end
+        if targetBtn then
+            HookTradeItemButton(targetBtn, "target", i)
+        end
+    end
+end
+
+local function HookTradeFrameFallbackClick()
+    if not (_G.TradeFrame and _G.TradeFrame.HookScript) then return end
+    if _G.TradeFrame._EchoesTradeFallbackHooked then return end
+    _G.TradeFrame._EchoesTradeFallbackHooked = true
+
+    _G.TradeFrame:HookScript("OnMouseUp", function(selfFrame, mouseButton)
+        if mouseButton ~= "RightButton" then return end
+        if not TradeFeaturesEnabled() then return end
+
+        local focus = (type(GetMouseFocus) == "function") and GetMouseFocus() or nil
+        if not focus or not focus.GetName then return end
+        local name = focus:GetName() or ""
+        if name == "" then return end
+
+        if not (name:find("TradeRecipientItem", 1, true) or name:find("TradeFrameRecipientItem", 1, true) or name:find("TradeFrameTargetItem", 1, true)) then
+            return
+        end
+
+        local idx = tonumber(name:match("(%d+)$"))
+        if not idx or idx < 1 or idx > 7 then return end
+
+        local target = GetTradeTargetName()
+        if target == "" then return end
+
+        local link = (type(GetTradeTargetItemLink) == "function") and GetTradeTargetItemLink(idx) or nil
+        if not link or link == "" then
+            local nameText = (type(GetTradeTargetItemInfo) == "function") and select(1, GetTradeTargetItemInfo(idx)) or nil
+            if nameText and nameText ~= "" then
+                link = "[" .. nameText .. "]"
+            end
+        end
+        if not link or link == "" then return end
+
+        if type(SendChatMessage) == "function" then
+            SendChatMessage(link, "WHISPER", nil, target)
+        end
+    end)
 end
 
 local function EnsureInvBar(self)
@@ -400,11 +705,114 @@ local function EnsurePlayerInvFrame(self)
     close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -2, -2)
 
     local title = f:CreateFontString(nil, "OVERLAY")
-    title:SetPoint("TOP", f, "TOP", 0, -10)
+    title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
     title:SetTextColor(0.9, 0.8, 0.5, 1)
     SetEchoesFont(title, 14, ECHOES_FONT_FLAGS)
+    title:SetJustifyH("LEFT")
     title:SetText("Inventory")
     f._EchoesTitle = title
+
+    local search = CreateFrame("EditBox", nil, f)
+    search:SetAutoFocus(false)
+    search:SetSize(160, 20)
+    search:SetPoint("TOP", f, "TOP", 0, -10)
+    if search.SetTextInsets then
+        search:SetTextInsets(6, 6, 3, 3)
+    end
+    if search.GetRegions then
+        local regs = { search:GetRegions() }
+        for _, r in ipairs(regs) do
+            if r and r.IsObjectType and r:IsObjectType("Texture") then
+                r:SetTexture(nil)
+            end
+        end
+    end
+    SkinBackdrop(search, 0.95)
+    search:SetBackdropColor(0.06, 0.06, 0.06, 0.95)
+    search:SetBackdropBorderColor(0, 0, 0, 1)
+    if search.SetFont then
+        search:SetFont("Fonts\\FRIZQT__.TTF", 11, "")
+    end
+    if search.SetTextColor then
+        search:SetTextColor(0.90, 0.85, 0.70, 1)
+    end
+
+
+    local clearBtn = CreateFrame("Button", nil, f)
+    clearBtn:SetSize(16, 16)
+    clearBtn:SetPoint("LEFT", search, "RIGHT", 6, 0)
+    clearBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+    clearBtn:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+    clearBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
+    if clearBtn.GetNormalTexture then
+        local tex = clearBtn:GetNormalTexture()
+        if tex and tex.SetVertexColor then
+            tex:SetVertexColor(0.7, 0.7, 0.7, 1)
+        end
+    end
+    clearBtn:SetScript("OnClick", function()
+        if search and search.ClearFocus then
+            search:ClearFocus()
+        end
+        if f and f._EchoesSetSearchText then
+            f._EchoesSetSearchText("Search", true)
+        end
+        if f and f._EchoesActivePlayer and f.IsShown and f:IsShown() then
+            Echoes:Inv_ShowPlayer(f._EchoesActivePlayer)
+        end
+    end)
+    f._EchoesSearchClear = clearBtn
+
+    local function SetSearchText(text, isPlaceholder)
+        search._EchoesInternalUpdate = true
+        search:SetText(text)
+        if isPlaceholder and search.SetTextColor then
+            search:SetTextColor(0.6, 0.6, 0.6, 1)
+        elseif search.SetTextColor then
+            search:SetTextColor(0.90, 0.85, 0.70, 1)
+        end
+        search._EchoesInternalUpdate = false
+    end
+
+    f._EchoesSetSearchText = SetSearchText
+
+    SetSearchText("Search", true)
+
+    search:SetScript("OnEditFocusGained", function(selfBox)
+        if selfBox:GetText() == "Search" then
+            SetSearchText("", false)
+        end
+    end)
+    search:SetScript("OnEditFocusLost", function(selfBox)
+        if selfBox:GetText() == "" then
+            SetSearchText("Search", true)
+        end
+    end)
+    search:SetScript("OnEscapePressed", function(selfBox)
+        if selfBox.ClearFocus then
+            selfBox:ClearFocus()
+        end
+        if selfBox:GetText() == "" then
+            SetSearchText("Search", true)
+        end
+    end)
+    search:SetScript("OnEnterPressed", function(selfBox)
+        if selfBox.ClearFocus then
+            selfBox:ClearFocus()
+        end
+        if selfBox:GetText() == "" then
+            SetSearchText("Search", true)
+        end
+    end)
+    search:SetScript("OnTextChanged", function(selfBox)
+        if selfBox._EchoesInternalUpdate then return end
+        local parent = selfBox:GetParent()
+        if parent and parent._EchoesActivePlayer and parent.IsShown and parent:IsShown() then
+            Echoes:Inv_ShowPlayer(parent._EchoesActivePlayer)
+        end
+    end)
+
+    f._EchoesSearchBox = search
 
     -- (Removed) hint line under the title
 
@@ -512,7 +920,7 @@ local function UpdateInvItemTooltipAndCursor(btn)
     end
 end
 
-local function TryResolveEntryInPlace(entry)
+TryResolveEntryInPlace = function(entry)
     if type(entry) ~= "table" then return false end
 
     local changed = false
@@ -546,7 +954,7 @@ local function TryResolveEntryInPlace(entry)
     return changed
 end
 
-local function EntryKey(entry)
+EntryKey = function(entry)
     if not entry then return nil end
     if entry.itemId then
         return "id:" .. tostring(entry.itemId)
@@ -666,7 +1074,7 @@ function Echoes:Inv_RequestPlayerInventory(targetName)
     rec._invDumpStartedAt = self.Inv._scanStartedAt
     self.Inv.byName[targetName] = rec
 
-    -- Listen for only 1 second.
+    -- Listen for only 2 seconds.
     self._EchoesInvSessionActive = true
     if self.CancelTimer and self.Inv and self.Inv._listenTimer then
         self:CancelTimer(self.Inv._listenTimer, true)
@@ -678,7 +1086,7 @@ function Echoes:Inv_RequestPlayerInventory(targetName)
             if self.Inv and self.Inv._sessionSeq == seq then
                 self._EchoesInvSessionActive = false
             end
-        end, 1)
+        end, 2)
     end
 
     if type(SendChatMessage) == "function" then
@@ -715,7 +1123,7 @@ function Echoes:Inv_RequeryPlayerInventory(targetName)
 
     -- Buffer refreshed inventory into a new array/map so the UI doesn't "flash"
     -- (no wiping/rebuilding mid-refresh). We'll swap in the new snapshot once the
-    -- 1s listen window closes.
+    -- 2s listen window closes.
     rec._nextLines = {}
     rec._nextItems = {}
     rec._nextAgg = {}
@@ -735,7 +1143,7 @@ function Echoes:Inv_RequeryPlayerInventory(targetName)
             if self.Inv and self.Inv._sessionSeq == seq then
                 self._EchoesInvSessionActive = false
             end
-        end, 1)
+        end, 2)
     end
 
     if type(SendChatMessage) == "function" then
@@ -763,7 +1171,7 @@ function Echoes:Inv_RequeryPlayerInventory(targetName)
             if f and f._EchoesActivePlayer == targetName and f.IsShown and f:IsShown() then
                 self:Inv_ShowPlayer(targetName)
             end
-        end, 1.05)
+        end, 2.05)
     end
 
     if self.RegisterEvent and not self._EchoesInvItemInfoRegistered then
@@ -862,8 +1270,6 @@ function Echoes:Inv_ShowPlayer(name)
             end)
 
             b:SetScript("OnClick", function(selfBtn, mouseButton)
-                if mouseButton ~= "RightButton" then return end
-
                 local target = selfBtn._EchoesOwnerName
                 if not target or target == "" then return end
 
@@ -878,6 +1284,22 @@ function Echoes:Inv_ShowPlayer(name)
                     payload = "[" .. plain .. "]"
                 end
                 if not payload then return end
+
+                if mouseButton == "LeftButton" then
+                    if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
+                        if type(ChatEdit_InsertLink) == "function" then
+                            if (type(ChatEdit_GetActiveWindow) == "function") and not ChatEdit_GetActiveWindow() and type(ChatFrame_OpenChat) == "function" then
+                                ChatFrame_OpenChat("")
+                            end
+                            ChatEdit_InsertLink(payload)
+                        elseif type(HandleModifiedItemClick) == "function" and link and link ~= "" then
+                            HandleModifiedItemClick(link)
+                        end
+                    end
+                    return
+                end
+
+                if mouseButton ~= "RightButton" then return end
 
                 local isCtrl = (type(IsControlKeyDown) == "function") and IsControlKeyDown() or false
                 local isShift = (type(IsShiftKeyDown) == "function") and IsShiftKeyDown() or false
@@ -959,10 +1381,16 @@ function Echoes:Inv_ShowPlayer(name)
 
                 if type(SendChatMessage) ~= "function" then return end
                 SendChatMessage("s " .. payload, "WHISPER", nil, target)
-                if Echoes and Echoes.Inv_SubtractItem then
-                    Echoes:Inv_SubtractItem(target, selfBtn._EchoesEntryKey, selfBtn._EchoesEntryCount)
-                end
-                -- Selling should update locally (no requery) to avoid flashing.
+                Echoes.Inv = Echoes.Inv or {}
+                Echoes.Inv._pendingSell = Echoes.Inv._pendingSell or {}
+                Echoes.Inv._pendingSell[#Echoes.Inv._pendingSell + 1] = {
+                    owner = NormalizeName(target),
+                    entryKey = selfBtn._EchoesEntryKey,
+                    count = selfBtn._EchoesEntryCount,
+                    link = selfBtn._EchoesItemLink,
+                    name = selfBtn._EchoesItemPlainName,
+                }
+                -- Wait for "Selling" whisper before removing locally.
             end)
         end
 
@@ -980,6 +1408,23 @@ function Echoes:Inv_ShowPlayer(name)
         b._EchoesItemId = itemId
         b._EchoesItemPlainName = GetEntryName(entry)
         b._EchoesItemName = link or (b._EchoesItemPlainName ~= "" and b._EchoesItemPlainName) or (itemId and ("item:" .. tostring(itemId)) or "item")
+
+        local searchQuery = ""
+        if f._EchoesSearchBox and f._EchoesSearchBox.GetText then
+            local t = tostring(f._EchoesSearchBox:GetText() or "")
+            if t ~= "" and t ~= "Search" then
+                searchQuery = t:lower()
+            end
+        end
+        local match = true
+        if searchQuery ~= "" then
+            local itemName = b._EchoesItemPlainName ~= "" and b._EchoesItemPlainName or b._EchoesItemName
+            itemName = tostring(itemName or ""):lower()
+            match = itemName:find(searchQuery, 1, true) ~= nil
+        end
+        if b.SetAlpha then
+            b:SetAlpha(match and 1 or 0.2)
+        end
 
         if _G.SetItemButtonTexture then
             _G.SetItemButtonTexture(b, tex)
@@ -1025,6 +1470,427 @@ function Echoes:Inv_ShowPlayer(name)
     f:Show()
 end
 
+local function IsTradableMessageLine(msg)
+    local lower = tostring(msg or ""):lower()
+    if lower:find("soulbound", 1, true) or lower:find("soul bound", 1, true) then
+        return false
+    end
+    if lower:find("quest item", 1, true) then
+        return false
+    end
+    if lower:find("(quest", 1, true) or lower:find("quest)", 1, true) then
+        return false
+    end
+    return true
+end
+
+function Echoes:Trade_OnShow()
+    if not TradeFeaturesEnabled() then return end
+    EnsureTradeState(self)
+
+    local target = GetTradeTargetName()
+    if target == "" then
+        return
+    end
+
+    HookTradeFrameButtons()
+    HookTradeFrameFallbackClick()
+
+    self.Trade.activeName = target
+    self.Trade.byName[target] = { items = {}, _agg = {}, _received = false }
+
+    local f = EnsureTradeFrame(self)
+    if f and _G.TradeFrame then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", _G.TradeFrame, "TOPRIGHT", 10, 0)
+        f:Show()
+    end
+
+    if self.Trade_ShowItems then
+        self:Trade_ShowItems(target)
+    end
+end
+
+function Echoes:Trade_OnClosed()
+    if self.UI and self.UI.tradeFrame then
+        self.UI.tradeFrame:Hide()
+    end
+    if self.Trade then
+        self.Trade.activeName = nil
+    end
+end
+
+function Echoes:Trade_OnTargetItemChanged()
+    if not TradeFeaturesEnabled() then return end
+    if not (_G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown()) then return end
+    if not self.Trade or not self.Trade.activeName then return end
+    self:Trade_ShowItems(self.Trade.activeName)
+end
+
+function Echoes:Trade_AddItems(ownerName, items)
+    if not TradeFeaturesEnabled() then return end
+    EnsureTradeState(self)
+
+    ownerName = NormalizeName(ownerName)
+    if ownerName == "" then return end
+
+    local rec = self.Trade.byName[ownerName]
+    if not rec then
+        rec = { items = {}, _agg = {}, _received = false }
+        self.Trade.byName[ownerName] = rec
+    end
+
+    if type(items) ~= "table" then return end
+    for _, it in ipairs(items) do
+        if type(it) == "table" then
+            local sellPrice = GetEntrySellPrice(it)
+            if sellPrice and sellPrice > 0 then
+                rec.items[#rec.items + 1] = it
+            end
+        end
+    end
+
+    rec._received = true
+
+    local out, agg = NormalizeAndAggregateItems(rec.items)
+    rec.items = out
+    rec._agg = agg
+
+    if self.Trade_ShowItems then
+        self:Trade_ShowItems(ownerName)
+    end
+end
+
+function Echoes:Trade_ClearItems(ownerName)
+    if not TradeFeaturesEnabled() then return end
+    EnsureTradeState(self)
+
+    ownerName = NormalizeName(ownerName)
+    if ownerName == "" then return end
+
+    local rec = self.Trade.byName[ownerName]
+    if not rec then
+        rec = { items = {}, _agg = {}, _received = false }
+        self.Trade.byName[ownerName] = rec
+    else
+        rec.items = {}
+        rec._agg = {}
+        rec._received = false
+    end
+
+    if self.Trade_ShowItems then
+        self:Trade_ShowItems(ownerName)
+    end
+end
+
+function Echoes:Trade_ShowItems(ownerName)
+    if not TradeFeaturesEnabled() then return end
+    EnsureTradeState(self)
+
+    ownerName = NormalizeName(ownerName)
+    if ownerName == "" then return end
+
+    local f = EnsureTradeFrame(self)
+    if not f then return end
+
+    if _G.TradeFrame then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", _G.TradeFrame, "TOPRIGHT", 10, 0)
+    end
+
+    local rec = self.Trade.byName[ownerName]
+    local baseList = rec and rec.items or {}
+
+    local offeredList, offeredMap = GetTradeTargetOfferEntries()
+    if #offeredList > 0 then
+        local filtered = {}
+        for _, it in ipairs(offeredList) do
+            local sellPrice = GetEntrySellPrice(it)
+            if sellPrice and sellPrice > 0 then
+                filtered[#filtered + 1] = it
+            end
+        end
+        offeredList = filtered
+        offeredMap = {}
+        for _, it in ipairs(offeredList) do
+            local key = EntryKey(it)
+            if key then
+                offeredMap[key] = it
+            end
+        end
+    end
+
+    local list = {}
+    for _, entry in ipairs(baseList) do
+        local key = EntryKey(entry)
+        local totalCount = tonumber(entry.count) or 1
+        local offeredEntry = key and offeredMap[key]
+        local offeredCount = offeredEntry and (tonumber(offeredEntry.count) or 0) or 0
+        local remaining = totalCount - offeredCount
+        if remaining > 0 then
+            local copy = {
+                itemId = entry.itemId,
+                link = entry.link,
+                name = entry.name,
+                count = remaining,
+            }
+            list[#list + 1] = copy
+        end
+    end
+
+    local total = #list
+    local offeredTotal = #offeredList
+
+    local slotSize = 32
+    local pad = 6
+    local cols = 5
+    local startX = 12
+    local startY = -30
+
+    local rows = math.max(1, math.ceil(total / cols))
+    local offeredRows = (offeredTotal > 0) and math.max(1, math.ceil(offeredTotal / cols)) or 0
+
+    local width = startX * 2 + cols * slotSize + (cols - 1) * pad
+    local height = 36 + rows * slotSize + (rows - 1) * pad + 14
+    if offeredTotal > 0 then
+        height = height + 12 + 12 + offeredRows * slotSize + (offeredRows - 1) * pad
+    end
+    height = math.max(140, height)
+    f:SetSize(width, height)
+
+    if f._EchoesEmptyText then
+        if total == 0 then
+            if rec and rec._received then
+                f._EchoesEmptyText:SetText("No tradable items.")
+            else
+                f._EchoesEmptyText:SetText("Waiting for tradable items...")
+            end
+            f._EchoesEmptyText:Show()
+        else
+            f._EchoesEmptyText:Hide()
+        end
+    end
+
+    for idx = 1, total do
+        local entry = list[idx]
+        local b = f._EchoesSlots[idx]
+
+        if not b then
+            local btnName = "EchoesTradeItem" .. tostring(idx)
+            b = CreateFrame("Button", btnName, f, "ItemButtonTemplate")
+            b:SetSize(slotSize, slotSize)
+            f._EchoesSlots[idx] = b
+
+            if b.RegisterForClicks then
+                b:RegisterForClicks("LeftButtonUp")
+            end
+
+            b:SetScript("OnEnter", function(selfBtn)
+                UpdateTradeItemTooltip(selfBtn)
+            end)
+            b:SetScript("OnLeave", function()
+                if rawget(_G, "GameTooltip") then GameTooltip:Hide() end
+                if type(ResetCursor) == "function" then ResetCursor() end
+            end)
+
+            b:SetScript("OnClick", function(selfBtn)
+                local target = selfBtn._EchoesOwnerName
+                if not target or target == "" then return end
+
+                local link = selfBtn._EchoesItemLink
+                local plain = selfBtn._EchoesItemPlainName
+                local payload
+                if link and link ~= "" then
+                    payload = link
+                elseif plain and plain ~= "" then
+                    payload = "[" .. plain .. "]"
+                end
+                if not payload then return end
+
+                if type(SendChatMessage) == "function" then
+                    SendChatMessage(payload, "WHISPER", nil, target)
+                end
+
+                if Echoes and Echoes.Trade_ClearItems then
+                    Echoes:Trade_ClearItems(target)
+                end
+            end)
+        end
+
+        local row = math.floor((idx - 1) / cols)
+        local col = (idx - 1) % cols
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT", f, "TOPLEFT", startX + col * (slotSize + pad), startY - row * (slotSize + pad))
+
+        local tex, link, itemId = ResolveItemVisual(entry)
+        b._EchoesEntry = entry
+        b._EchoesOwnerName = ownerName
+        b._EchoesItemLink = link
+        b._EchoesItemId = itemId
+        b._EchoesItemPlainName = GetEntryName(entry)
+        b._EchoesItemName = link or (b._EchoesItemPlainName ~= "" and b._EchoesItemPlainName) or (itemId and ("item:" .. tostring(itemId)) or "item")
+
+        if _G.SetItemButtonTexture then
+            _G.SetItemButtonTexture(b, tex)
+        elseif b.icon and b.icon.SetTexture then
+            b.icon:SetTexture(tex)
+        else
+            local icon = b:CreateTexture(nil, "ARTWORK")
+            icon:SetAllPoints(b)
+            icon:SetTexture(tex)
+            b.icon = icon
+        end
+
+        local count = tonumber(entry.count) or 1
+        if _G.SetItemButtonCount then
+            _G.SetItemButtonCount(b, count)
+        elseif b.Count and b.Count.SetText then
+            b.Count:SetText((count and count > 1) and tostring(count) or "")
+        end
+
+        b:Show()
+    end
+
+    local i = total + 1
+    while f._EchoesSlots[i] do
+        f._EchoesSlots[i]:Hide()
+        i = i + 1
+    end
+
+    local inTradeLabel = f._EchoesInTradeLabel
+    if offeredTotal > 0 then
+        local labelY = startY - rows * (slotSize + pad) - 12
+        if inTradeLabel then
+            inTradeLabel:ClearAllPoints()
+            inTradeLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 10, labelY)
+            inTradeLabel:Show()
+        end
+
+        local offeredStartY = labelY - 16
+        for idx = 1, offeredTotal do
+            local entry = offeredList[idx]
+            local b = f._EchoesInTradeSlots[idx]
+
+            if not b then
+                local btnName = "EchoesTradeOfferedItem" .. tostring(idx)
+                b = CreateFrame("Button", btnName, f, "ItemButtonTemplate")
+                b:SetSize(slotSize, slotSize)
+                f._EchoesInTradeSlots[idx] = b
+
+                if b.RegisterForClicks then
+                    b:RegisterForClicks("LeftButtonUp")
+                end
+
+                b:SetScript("OnEnter", function(selfBtn)
+                    UpdateTradeItemTooltip(selfBtn)
+                end)
+                b:SetScript("OnLeave", function()
+                    if rawget(_G, "GameTooltip") then GameTooltip:Hide() end
+                    if type(ResetCursor) == "function" then ResetCursor() end
+                end)
+
+                b:SetScript("OnClick", function(selfBtn)
+                    local target = selfBtn._EchoesOwnerName
+                    if not target or target == "" then return end
+
+                    local link = selfBtn._EchoesItemLink
+                    local plain = selfBtn._EchoesItemPlainName
+                    local payload
+                    if link and link ~= "" then
+                        payload = link
+                    elseif plain and plain ~= "" then
+                        payload = "[" .. plain .. "]"
+                    end
+                    if not payload then return end
+
+                    if type(SendChatMessage) == "function" then
+                        SendChatMessage(payload, "WHISPER", nil, target)
+                    end
+                end)
+            end
+
+            local row = math.floor((idx - 1) / cols)
+            local col = (idx - 1) % cols
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", f, "TOPLEFT", startX + col * (slotSize + pad), offeredStartY - row * (slotSize + pad))
+
+            local tex, link, itemId = ResolveItemVisual(entry)
+            b._EchoesEntry = entry
+            b._EchoesOwnerName = ownerName
+            b._EchoesItemLink = link
+            b._EchoesItemId = itemId
+            b._EchoesItemPlainName = GetEntryName(entry)
+            b._EchoesItemName = link or (b._EchoesItemPlainName ~= "" and b._EchoesItemPlainName) or (itemId and ("item:" .. tostring(itemId)) or "item")
+
+            if _G.SetItemButtonTexture then
+                _G.SetItemButtonTexture(b, tex)
+            elseif b.icon and b.icon.SetTexture then
+                b.icon:SetTexture(tex)
+            else
+                local icon = b:CreateTexture(nil, "ARTWORK")
+                icon:SetAllPoints(b)
+                icon:SetTexture(tex)
+                b.icon = icon
+            end
+
+            local count = tonumber(entry.count) or 1
+            if _G.SetItemButtonCount then
+                _G.SetItemButtonCount(b, count)
+            elseif b.Count and b.Count.SetText then
+                b.Count:SetText((count and count > 1) and tostring(count) or "")
+            end
+
+            b:Show()
+        end
+
+        local j = offeredTotal + 1
+        while f._EchoesInTradeSlots[j] do
+            f._EchoesInTradeSlots[j]:Hide()
+            j = j + 1
+        end
+    else
+        if inTradeLabel then
+            inTradeLabel:Hide()
+        end
+        local j = 1
+        while f._EchoesInTradeSlots[j] do
+            f._EchoesInTradeSlots[j]:Hide()
+            j = j + 1
+        end
+    end
+
+    f:Show()
+end
+
+function Echoes:Trade_OnWhisper(msg, author)
+    if not TradeFeaturesEnabled() then return end
+    if not (_G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown()) then return end
+
+    local target = GetTradeTargetName()
+    if target == "" then return end
+    if NormalizeName(author) ~= NormalizeName(target) then return end
+
+    EnsureTradeState(self)
+    local rec = self.Trade.byName[target]
+    if not rec then
+        rec = { items = {}, _agg = {}, _received = true }
+        self.Trade.byName[target] = rec
+    else
+        rec._received = true
+    end
+
+    if tostring(msg or ""):find("Equipping", 1, true) then return end
+    if not IsTradableMessageLine(msg) then return end
+
+    local items = ParseItemsFromInventoryLine(msg)
+    if #items == 0 then
+        items = ParseItemsFromMessage(msg)
+    end
+    if #items == 0 then return end
+
+    self:Trade_AddItems(target, items)
+end
+
 local function RebuildInvBarButtons(self)
     local bar = EnsureInvBar(self)
     local members = self.Inv.members or {}
@@ -1038,6 +1904,8 @@ local function RebuildInvBarButtons(self)
     local y0 = -24
     local size = 30
     local gap = 6
+    local firstRowCount = 4
+    local perRow = 5
 
     for i, member in ipairs(members) do
         local b = bar._EchoesButtons[i]
@@ -1080,6 +1948,12 @@ local function RebuildInvBarButtons(self)
                     end
                 end
 
+                local f = Echoes.UI and Echoes.UI.invPlayerFrame
+                if f and f.IsShown and f:IsShown() and f._EchoesActivePlayer == target then
+                    if f.Hide then f:Hide() end
+                    return
+                end
+
                 Echoes:Inv_RequestPlayerInventory(target)
                 Echoes:Inv_ShowPlayer(target)
             end)
@@ -1093,21 +1967,47 @@ local function RebuildInvBarButtons(self)
         b._EchoesPlayerName = normName
         b._EchoesDisplayName = displayName
         if b._EchoesIcon and b._EchoesIcon.SetTexture then
-            b._EchoesIcon:SetTexture(GetClassIconTexture(classFile))
+            local tex, coords = GetClassIconTexture(classFile)
+            b._EchoesIcon:SetTexture(tex)
+            if coords then
+                b._EchoesIcon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+            else
+                b._EchoesIcon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+            end
+        end
+
+        local index = i - 1
+        local row, col
+        if index < firstRowCount then
+            row = 0
+            col = index
+        else
+            row = 1 + math.floor((index - firstRowCount) / perRow)
+            col = (index - firstRowCount) % perRow
         end
 
         b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", bar, "TOPLEFT", x0 + (i - 1) * (size + gap), y0)
+        b:SetPoint("TOPLEFT", bar, "TOPLEFT", x0 + col * (size + gap), y0 - row * (size + gap))
         b:Show()
     end
 
     -- Resize bar to fit (cap width so it doesn't run off screen).
-    local w = x0 + (#members * (size + gap)) + 44
+    local maxCols = math.max(firstRowCount, perRow)
+    local w = x0 + (maxCols * (size + gap)) + 44
     if bar._EchoesMinWidth then
         w = math.max(w, bar._EchoesMinWidth)
     end
     w = math.min(w, 760)
     bar:SetWidth(w)
+
+    local rows = 1
+    if #members > firstRowCount then
+        rows = 1 + math.ceil((#members - firstRowCount) / perRow)
+    end
+    local h = 24 + rows * (size + gap) + 10
+    if bar.SetHeight then
+        bar:SetHeight(h)
+    end
 end
 
 function Echoes:Inv_RefreshMembers()
@@ -1148,7 +2048,7 @@ function Echoes:Inv_OnWhisper(msg, author)
     -- Hard cutoff: only accept inventory lines for 1 second after scan starts.
     local now = (type(GetTime) == "function" and GetTime()) or 0
     local started = tonumber(self.Inv and self.Inv._scanStartedAt) or 0
-    if started > 0 and (now - started) > 1 then
+        if started > 0 and (now - started) > 2 then
         return
     end
 
@@ -1166,6 +2066,11 @@ function Echoes:Inv_OnWhisper(msg, author)
     -- Header starts a fresh dump for this author (prevents duplicates across multiple scans/dumps).
     if IsInventoryHeaderLine(trimmed) then
         local rec = self.Inv.byName[author] or {}
+        if rec._invEndTimer and self.CancelTimer then
+            self:CancelTimer(rec._invEndTimer, true)
+            rec._invEndTimer = nil
+        end
+        rec._invDumpClosed = false
         if rec._nextSeq == self.Inv._sessionSeq and rec._nextItems and rec._nextAgg then
             rec._nextLines = {}
             rec._nextItems = {}
@@ -1194,6 +2099,9 @@ function Echoes:Inv_OnWhisper(msg, author)
     end
 
     local rec = self.Inv.byName[author] or {}
+    if rec._invDumpClosed and rec._invDumpSeq == self.Inv._sessionSeq then
+        return
+    end
     rec.lines = rec.lines or {}
     rec.items = rec.items or {}
     rec._agg = rec._agg or {}
@@ -1263,6 +2171,23 @@ function Echoes:Inv_OnWhisper(msg, author)
 
     self.Inv.byName[author] = rec
 
+    -- If no more lines arrive shortly, close the dump for this author.
+    if self.ScheduleTimer then
+        if rec._invEndTimer and self.CancelTimer then
+            self:CancelTimer(rec._invEndTimer, true)
+        end
+        local seq = self.Inv._sessionSeq
+        rec._invEndTimer = self:ScheduleTimer(function()
+            local r = self.Inv and self.Inv.byName and self.Inv.byName[author]
+            if not r then return end
+            if r._invDumpSeq == seq then
+                r._invDumpClosed = true
+                self.Inv.byName[author] = r
+            end
+        end, 0.4)
+        self.Inv.byName[author] = rec
+    end
+
     self.Inv.responses[#self.Inv.responses + 1] = {
         from = author,
         msg = trimmed,
@@ -1277,6 +2202,42 @@ function Echoes:Inv_OnWhisper(msg, author)
             self:Inv_ShowPlayer(author)
         end
     end
+end
+
+function Echoes:Inv_OnSellWhisper(msg, author)
+    EnsureInvState(self)
+
+    local info = ParseSoldItemFromMessage(msg)
+    if not info then return false end
+
+    author = NormalizeName(author)
+    if author == "" then return false end
+
+    local pending = self.Inv._pendingSell or {}
+    local matchIndex
+    for i, p in ipairs(pending) do
+        if p and p.owner == author then
+            if info.link and p.link and p.link == info.link then
+                matchIndex = i
+                break
+            end
+            if info.name and p.name and p.name:lower() == info.name:lower() then
+                matchIndex = i
+                break
+            end
+        end
+    end
+
+    if matchIndex then
+        local p = table.remove(pending, matchIndex)
+        self.Inv._pendingSell = pending
+        if p and p.entryKey and p.count then
+            self:Inv_SubtractItem(author, p.entryKey, p.count)
+        end
+        return true
+    end
+
+    return false
 end
 
 function Echoes:RunInventoryScan()

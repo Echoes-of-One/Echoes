@@ -41,6 +41,11 @@ function Echoes:OnEnable()
 
     -- Bot "Hello!" whisper detection for invite verification.
     self:RegisterEvent("CHAT_MSG_WHISPER", "OnEchoesChatMsgWhisper")
+
+    -- Trade helper frame events.
+    self:RegisterEvent("TRADE_SHOW", "OnEchoesTradeShow")
+    self:RegisterEvent("TRADE_CLOSED", "OnEchoesTradeClosed")
+    self:RegisterEvent("TRADE_TARGET_ITEM_CHANGED", "OnEchoesTradeTargetItemChanged")
 end
 
 function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
@@ -53,6 +58,14 @@ function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
     -- 0) Inventory scan responses (opt-in: only consumes messages starting with "items").
     if self.Inv_OnWhisper then
         self:Inv_OnWhisper(msg, author)
+    end
+
+    if self.Inv_OnSellWhisper then
+        self:Inv_OnSellWhisper(msg, author)
+    end
+
+    if self.Trade_OnWhisper then
+        self:Trade_OnWhisper(msg, author)
     end
 
     if msg ~= "Hello!" then return end
@@ -84,6 +97,24 @@ function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
     if self._EchoesBotAddSessionActive then
         self._EchoesBotAddHelloFrom = self._EchoesBotAddHelloFrom or {}
         self._EchoesBotAddHelloFrom[author] = true
+    end
+end
+
+function Echoes:OnEchoesTradeShow()
+    if self.Trade_OnShow then
+        self:Trade_OnShow()
+    end
+end
+
+function Echoes:OnEchoesTradeClosed()
+    if self.Trade_OnClosed then
+        self:Trade_OnClosed()
+    end
+end
+
+function Echoes:OnEchoesTradeTargetItemChanged()
+    if self.Trade_OnTargetItemChanged then
+        self:Trade_OnTargetItemChanged()
     end
 end
 
