@@ -28,7 +28,7 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
           # Validate tag matches the version defined in the addon code.
-          VERSION=$(grep -Eo 'Echoes\.VERSION\s*=\s*"[0-9]+\.[0-9]+"' Bootstrap.lua | head -n 1 | sed -E 's/.*"([0-9]+\.[0-9]+)"/\1/')
+          VERSION=$(grep -Eo 'Echoes\.VERSION[[:space:]]*=[[:space:]]*"[0-9]+\.[0-9]+"' Bootstrap.lua | head -n 1 | sed -E 's/.*"([0-9]+\.[0-9]+)"/\1/')
           if [ -z "${VERSION}" ]; then
             echo "Could not read Echoes.VERSION from Bootstrap.lua" >&2
             exit 1
