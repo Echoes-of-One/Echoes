@@ -1,8 +1,8 @@
 ## Interface: 30300
-## Title: Echoes
+## Title: Echoes (dev)
 ## Notes: Playerbot control helper (Ace3 UI)
 ## Author: Patchs
-## Version: 0.12
+## Version: 0.12-dev
 ## SavedVariables: EchoesDB
 
 # Embedded Ace3 (so Echoes is self-contained).
@@ -25,13 +25,17 @@ Ace3\AceTab-3.0\AceTab-3.0.xml
 Ace3\AceSerializer-3.0\AceSerializer-3.0.xml
 
 Bootstrap.lua
+Core\LoadProbe0.lua
 
 # Core (shared systems)
 Core\Defaults.lua
+Core\LoadProbe1.lua
 Core\Utils.lua
+Core\LoadProbe2.lua
 Core\Skin.lua
 Core\SpecPanel.lua
 Core\Inventory.lua
+Core\LoadProbe.lua
 
 # Feature tabs (must load before MainWindow builds them)
 Modules\GroupTab.lua

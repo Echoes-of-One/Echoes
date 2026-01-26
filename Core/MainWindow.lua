@@ -1,6 +1,10 @@
 -- Core\MainWindow.lua
 -- Main window creation, tabs, sizing/scale, and slash command handling.
 
+if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow.lua executing")
+end
+
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 local AceGUI = LibStub("AceGUI-3.0")
 
@@ -27,6 +31,16 @@ local TAB_DEFS = {
 }
 
 local TOP_TAB_H = 26
+
+local function Echoes_AttemptGroupTabBridge(self)
+    if self.BuildGroupTab then return end
+    local g = _G.Echoes
+    if type(g) == "table" and type(g.BuildGroupTab) == "function" then
+        self.BuildGroupTab = g.BuildGroupTab
+        self._GroupTabLoaded = g._GroupTabLoaded or self._GroupTabLoaded
+        self._GroupTabGuid = g._GroupTabGuid or self._GroupTabGuid
+    end
+end
 
 local function Echoes_LayoutTopTabs(tabBar, buttons)
     if not tabBar or not buttons or #buttons == 0 then return end
@@ -241,6 +255,17 @@ function Echoes:SetActiveTab(key)
         container:PauseLayout()
     end
 
+    local function ShowGroupError(err)
+        self._EchoesLastGroupError = tostring(err or "unknown")
+        if self.Print then
+            self:Print("Group tab error: " .. self._EchoesLastGroupError)
+        else
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Group tab error: " .. self._EchoesLastGroupError)
+            end
+        end
+    end
+
     local page = self.UI.pages[key]
     if not page then
         page = AceGUI:Create("SimpleGroup")
@@ -253,19 +278,106 @@ function Echoes:SetActiveTab(key)
         if key == "BOT" then
             self:BuildBotTab(page)
         elseif key == "GROUP" then
-            self:BuildGroupTab(page)
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: entering GROUP tab build")
+            end
+            Echoes_AttemptGroupTabBridge(self)
+            if not self.BuildGroupTab then
+                local loaded = tostring(self._GroupTabLoaded)
+                local guid = tostring(self._EchoesGuid)
+                local gguid = tostring(self._GroupTabGuid)
+                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded). loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
+            else
+                local ok, err = xpcall(function()
+                    self:BuildGroupTab(page)
+                end, function(e)
+                    if type(debugstack) == "function" then
+                        return tostring(e) .. "\n" .. tostring(debugstack())
+                    end
+                    return tostring(e)
+                end)
+                if not ok then
+                    ShowGroupError(err)
+                else
+                    page._EchoesGroupBuilt = true
+                    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                        local childCount = page and page.children and #page.children or 0
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: GROUP built children=" .. tostring(childCount))
+                    end
+                end
+            end
         else
             self:BuildEchoesTab(page)
+        end
+    else
+        if container.children then
+            local found = false
+            for i = 1, #container.children do
+                if container.children[i] == page then
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                container:AddChild(page)
+            end
+        else
+            container:AddChild(page)
+        end
+
+        if key == "GROUP" and page and (not page._EchoesGroupBuilt or not page.children or #page.children == 0) then
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: rebuilding GROUP tab")
+            end
+            Echoes_AttemptGroupTabBridge(self)
+            if not self.BuildGroupTab then
+                local loaded = tostring(self._GroupTabLoaded)
+                local guid = tostring(self._EchoesGuid)
+                local gguid = tostring(self._GroupTabGuid)
+                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded). loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
+            else
+                local ok, err = xpcall(function()
+                    self:BuildGroupTab(page)
+                end, function(e)
+                    if type(debugstack) == "function" then
+                        return tostring(e) .. "\n" .. tostring(debugstack())
+                    end
+                    return tostring(e)
+                end)
+                if not ok then
+                    ShowGroupError(err)
+                else
+                    page._EchoesGroupBuilt = true
+                    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                        local childCount = page and page.children and #page.children or 0
+                        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: GROUP rebuilt children=" .. tostring(childCount))
+                    end
+                end
+            end
         end
     end
 
     for _, p in pairs(self.UI.pages) do
-        if p and p.frame then
-            p.frame:Hide()
+        if p then
+            if p.Hide then
+                p:Hide()
+            elseif p.frame then
+                p.frame:Hide()
+            end
         end
     end
-    if page and page.frame then
-        page.frame:Show()
+    if page then
+        if page.SetFullWidth then page:SetFullWidth(true) end
+        if page.SetFullHeight then page:SetFullHeight(true) end
+        if page.frame and container and container.frame and page.frame.SetAllPoints then
+            page.frame:ClearAllPoints()
+            page.frame:SetAllPoints(container.frame)
+        end
+        if page.Show then
+            page:Show()
+        elseif page.frame then
+            page.frame:Show()
+        end
     end
 
     if container.children then
@@ -276,10 +388,10 @@ function Echoes:SetActiveTab(key)
                 break
             end
         end
-        if foundIndex and foundIndex ~= 1 then
+        if foundIndex then
             table.remove(container.children, foundIndex)
-            table.insert(container.children, 1, page)
         end
+        table.insert(container.children, 1, page)
     end
 
     self:ApplyFrameSizeForTab(key)
@@ -289,6 +401,33 @@ function Echoes:SetActiveTab(key)
     end
     if container.DoLayout then
         container:DoLayout()
+    end
+
+    if key == "GROUP" and page and (not page.children or #page.children == 0) then
+        local label = AceGUI:Create("Label")
+        label:SetFullWidth(true)
+        local errText = self._EchoesLastGroupError or "Unknown error"
+        label:SetText("Group Creation failed to load.\n" .. errText)
+        page:AddChild(label)
+        if self.Print then
+            self:Print("Group tab: no children after build.")
+        end
+    end
+
+    if key == "GROUP" then
+        if self._EchoesRefreshGroupView then
+            self._EchoesRefreshGroupView(true)
+        elseif self.UpdateGroupCreationFromRoster then
+            self:UpdateGroupCreationFromRoster(true)
+        elseif self._EchoesLoadGroupPreset then
+            self._EchoesLoadGroupPreset(EchoesDB.groupTemplateIndex or 1)
+        end
+        if page and page.DoLayout then
+            page:DoLayout()
+        end
+        if container.DoLayout then
+            container:DoLayout()
+        end
     end
 end
 
@@ -356,8 +495,8 @@ function Echoes:CreateMainWindow()
         end)
         -- Do NOT AddChild() (it would invoke AceGUI layouts and add padding).
         -- Instead, parent it and position manually so it fills the whole row.
-        if btn.SetParent then
-            btn:SetParent(tabBar)
+        if btn.frame and tabBar.frame and btn.frame.SetParent then
+            btn.frame:SetParent(tabBar.frame)
         end
         if btn.frame and btn.frame.Show then
             btn.frame:Show()
@@ -393,16 +532,38 @@ function Echoes:CreateMainWindow()
     if last ~= "BOT" and last ~= "GROUP" and last ~= "ECHOES" then
         last = "BOT"
     end
-    self:SetActiveTab(last)
+    -- Defer tab activation until the frame is visible.
+
 end
 
 function Echoes:ToggleMainWindow()
     self:CreateMainWindow()
-    local f = self.UI.frame
-    if f:IsShown() then
-        f:Hide()
+    local widget = self.UI.frame
+    local f = widget and widget.frame
+    if f and f.IsShown and f:IsShown() then
+        if widget and widget.Hide then
+            widget:Hide()
+        end
     else
-        f:Show()
+        if widget and widget.Show then
+            widget:Show()
+        end
+        local active = (_G.EchoesDB and _G.EchoesDB.lastPanel) or "BOT"
+        if active ~= "BOT" and active ~= "GROUP" and active ~= "ECHOES" then
+            active = "BOT"
+        end
+        self:ApplyFrameSizeForTab(active)
+        self:SetActiveTab(active)
+        if self.RunAfter then
+            self:RunAfter(0, function()
+                local w = self.UI and self.UI.frame
+                if w and w.DoLayout then w:DoLayout() end
+                local content = self.UI and self.UI.content
+                if content and content.DoLayout then content:DoLayout() end
+                local page = self.UI and self.UI.pages and self.UI.pages[active]
+                if page and page.DoLayout then page:DoLayout() end
+            end)
+        end
     end
 end
 

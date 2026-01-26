@@ -126,24 +126,6 @@ function Echoes:BuildEchoesTab(container)
     sliderPad:SetHeight(10)
     container:AddChild(sliderPad)
 
-    local tradeToggle = AceGUI:Create("CheckBox")
-    tradeToggle:SetLabel("Trade Features")
-    tradeToggle:SetValue(EchoesDB.tradeFeaturesEnabled ~= false)
-    tradeToggle:SetFullWidth(true)
-    tradeToggle:SetCallback("OnValueChanged", function(widget, event, value)
-        EchoesDB.tradeFeaturesEnabled = (value == true)
-        if not EchoesDB.tradeFeaturesEnabled then
-            if Echoes and Echoes.Trade_OnClosed then
-                Echoes:Trade_OnClosed()
-            end
-        elseif Echoes and Echoes.Trade_OnShow then
-            if _G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown() then
-                Echoes:Trade_OnShow()
-            end
-        end
-    end)
-    container:AddChild(tradeToggle)
-
     -- X / Y / Scale edit boxes (all on one row)
     local row = AceGUI:Create("SimpleGroup")
     row:SetFullWidth(true)
@@ -302,6 +284,33 @@ function Echoes:BuildEchoesTab(container)
 
     UpdatePositionEdits()
     UpdateScaleEdit()
+
+    local tradeToggle = AceGUI:Create("CheckBox")
+    tradeToggle:SetLabel("Trade Features")
+    tradeToggle:SetValue(EchoesDB.tradeFeaturesEnabled ~= false)
+    tradeToggle:SetFullWidth(true)
+    tradeToggle:SetCallback("OnValueChanged", function(widget, event, value)
+        EchoesDB.tradeFeaturesEnabled = (value == true)
+        if not EchoesDB.tradeFeaturesEnabled then
+            if Echoes and Echoes.Trade_OnClosed then
+                Echoes:Trade_OnClosed()
+            end
+        elseif Echoes and Echoes.Trade_OnShow then
+            if _G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown() then
+                Echoes:Trade_OnShow()
+            end
+        end
+    end)
+    container:AddChild(tradeToggle)
+
+    local spamToggle = AceGUI:Create("CheckBox")
+    spamToggle:SetLabel("Bot Spam Filter")
+    spamToggle:SetValue(EchoesDB.botSpamFilterEnabled == true)
+    spamToggle:SetFullWidth(true)
+    spamToggle:SetCallback("OnValueChanged", function(widget, event, value)
+        EchoesDB.botSpamFilterEnabled = (value == true)
+    end)
+    container:AddChild(spamToggle)
 
     self.UI = self.UI or {}
     self.UI.scaleSlider = scaleSlider

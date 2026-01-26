@@ -1,6 +1,10 @@
 -- Core\Defaults.lua
 -- SavedVariables defaults and static config.
 
+if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Defaults.lua executing")
+end
+
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 
 _G.EchoesDB = _G.EchoesDB or {}
@@ -33,6 +37,9 @@ function Echoes:EnsureDefaults()
     -- Trade helpers
     EchoesDB.tradeFeaturesEnabled = (EchoesDB.tradeFeaturesEnabled ~= nil) and EchoesDB.tradeFeaturesEnabled or true
 
+    -- Bot spam filter
+    EchoesDB.botSpamFilterEnabled = (EchoesDB.botSpamFilterEnabled ~= nil) and EchoesDB.botSpamFilterEnabled or false
+
     -- Main window movement lock (false = movable)
     EchoesDB.frameLocked        = (EchoesDB.frameLocked ~= nil) and EchoesDB.frameLocked or false
 
@@ -47,11 +54,11 @@ function Echoes:EnsureDefaults()
             name = "10 Man",
             slots = {
                 [1] = {
-                    [1] = nil,
+                    [1] = { class = "Druid",   specLabel = "Restoration" },
                     [2] = { class = "Paladin", specLabel = "Protection" },
                     [3] = { class = "Warrior", specLabel = "Protection" },
                     [4] = { class = "Priest",  specLabel = "Discipline" },
-                    [5] = { class = "Druid",   specLabel = "Restoration" },
+                    [5] = nil,
                 },
                 [2] = {
                     [1] = { class = "Rogue",  specLabel = "Combat" },
@@ -70,11 +77,11 @@ function Echoes:EnsureDefaults()
             name = "25 Man",
             slots = {
                 [1] = {
-                    [1] = nil,
+                    [1] = { class = "Paladin", specLabel = "Holy" },
                     [2] = { class = "Druid",   specLabel = "Bear" },
                     [3] = { class = "Paladin", specLabel = "Protection" },
                     [4] = { class = "Warrior", specLabel = "Protection" },
-                    [5] = { class = "Paladin", specLabel = "Holy" },
+                    [5] = nil,
                 },
                 [2] = {
                     [1] = { class = "Priest",  specLabel = "Discipline" },
@@ -113,6 +120,27 @@ function Echoes:EnsureDefaults()
         if t2 and t2.name == "25 Man" and e and e.class == "Druid" and e.specLabel == "Feral" and not e.altName then
             e.specLabel = "Bear"
         end
+    end
+
+    -- Migration: move Group 1 Slot 5 to Slot 1 for 10/25 Man defaults.
+    local function MoveGroup1Slot5ToSlot1(tplName)
+        local t = EchoesDB.groupTemplates and EchoesDB.groupTemplates[tplName]
+        if not t or not t.slots or not t.slots[1] then return end
+        local g1 = t.slots[1]
+        local s1 = g1[1]
+        local s5 = g1[5]
+        if s5 and (s1 == nil) then
+            g1[1] = s5
+            g1[5] = nil
+        end
+    end
+
+    -- Apply to known defaults by index if they match names.
+    if EchoesDB.groupTemplates[1] and EchoesDB.groupTemplates[1].name == "10 Man" then
+        MoveGroup1Slot5ToSlot1(1)
+    end
+    if EchoesDB.groupTemplates[2] and EchoesDB.groupTemplates[2].name == "25 Man" then
+        MoveGroup1Slot5ToSlot1(2)
     end
 end
 

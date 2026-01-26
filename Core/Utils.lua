@@ -1,6 +1,10 @@
 -- Core\Utils.lua
 -- Generic helpers, command mapping, timers/action queue, and shared data lists.
 
+if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Utils.lua executing")
+end
+
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 
 local function Echoes_Print(msg)

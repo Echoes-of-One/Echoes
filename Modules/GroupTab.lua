@@ -1,7 +1,30 @@
 -- Modules\GroupTab.lua
 -- Group Creation tab + roster-sync logic.
 
-local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
+if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab file executing (pre-LibStub)")
+end
+
+local LibStubRef = _G.LibStub
+if type(LibStubRef) ~= "function" and type(LibStubRef) ~= "table" then
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab aborted: LibStub missing")
+    end
+    return
+end
+
+local Echoes = LibStubRef("AceAddon-3.0"):GetAddon("Echoes", true) or _G.Echoes
+if type(Echoes) ~= "table" then
+    Echoes = {}
+end
+_G.Echoes = Echoes
+
+-- Debug marker to confirm this file loads on the active addon instance.
+Echoes._GroupTabLoaded = true
+Echoes._GroupTabGuid = Echoes._EchoesGuid
+if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab loaded")
+end
 local AceGUI = LibStub("AceGUI-3.0")
 
 -- Lua compatibility: some environments provide `table.unpack` but not global `unpack`.
@@ -47,6 +70,33 @@ function Echoes:BuildGroupTab(container)
         self:EnsureDefaults()
     end
 
+    -- Ensure shared lists/functions are initialized (load-order safety).
+    GROUP_TEMPLATES = Echoes.GROUP_TEMPLATES or GROUP_TEMPLATES or { "10 Man", "25 Man" }
+    GROUP_SLOT_OPTIONS = Echoes.GROUP_SLOT_OPTIONS or GROUP_SLOT_OPTIONS or {
+        "None",
+        "Paladin",
+        "Death Knight",
+        "Warrior",
+        "Shaman",
+        "Hunter",
+        "Druid",
+        "Rogue",
+        "Priest",
+        "Warlock",
+        "Mage",
+        "Altbot",
+    }
+    DEFAULT_CYCLE_VALUES = Echoes.DEFAULT_CYCLE_VALUES or DEFAULT_CYCLE_VALUES or {
+        { label = "None", icon = "Interface\\Icons\\INV_Misc_QuestionMark" },
+    }
+    if type(Echoes.GetCycleValuesForRightText) == "function" then
+        GetCycleValuesForRightText = Echoes.GetCycleValuesForRightText
+    elseif type(GetCycleValuesForRightText) ~= "function" then
+        GetCycleValuesForRightText = function()
+            return DEFAULT_CYCLE_VALUES
+        end
+    end
+
     -- Flat pane (no scrolling). The GROUP frame size is designed to fit the full grid.
     container:SetLayout("List")
 
@@ -54,9 +104,10 @@ function Echoes:BuildGroupTab(container)
     -- Slightly taller for readability, but not so tall that the 5x2 grid wastes space.
     local INPUT_HEIGHT = 22
     local ROW_H = INPUT_HEIGHT
+    local GROUP_LABEL_H = 12
     -- Compact, consistent height for the group slot grid. Without explicit heights,
     -- AceGUI containers default to a fairly tall value which looks like a huge empty panel.
-    local SLOT_GROUP_H = (5 * ROW_H) + 26
+    local SLOT_GROUP_H = (5 * ROW_H) + 26 + GROUP_LABEL_H
 
     local PRESET_COUNT = #GROUP_TEMPLATES
     -- Use a large numeric key so AceGUI's sorted dropdown puts this at the end.
@@ -82,13 +133,6 @@ function Echoes:BuildGroupTab(container)
     -- Clamp template index to presets + any user templates.
     EchoesDB.groupTemplateIndex = Clamp(tonumber(EchoesDB.groupTemplateIndex) or 1, 1, GetMaxTemplateIndex())
 
-    local headerPadTop = AceGUI:Create("SimpleGroup")
-    headerPadTop:SetFullWidth(true)
-    headerPadTop:SetLayout("Flow")
-    -- Keep the top tight so the Group Slots grid sits higher.
-    headerPadTop:SetHeight(0)
-    container:AddChild(headerPadTop)
-
     local topGroup = AceGUI:Create("SimpleGroup")
     topGroup:SetFullWidth(true)
     -- Anchor header widgets manually so the EditBox and Dropdown line up perfectly.
@@ -96,7 +140,40 @@ function Echoes:BuildGroupTab(container)
     if topGroup.SetAutoAdjustHeight then topGroup:SetAutoAdjustHeight(false) end
     topGroup:SetHeight(INPUT_HEIGHT)
     SkinSimpleGroup(topGroup)
-    container:AddChild(topGroup)
+
+    local groupSlotsRow = AceGUI:Create("SimpleGroup")
+    groupSlotsRow:SetFullWidth(true)
+    groupSlotsRow:SetLayout("None")
+    if groupSlotsRow.SetAutoAdjustHeight then groupSlotsRow:SetAutoAdjustHeight(false) end
+    groupSlotsRow:SetHeight(INPUT_HEIGHT)
+    container:AddChild(groupSlotsRow)
+
+    local modeRow = AceGUI:Create("SimpleGroup")
+    modeRow:SetFullWidth(true)
+    modeRow:SetLayout("None")
+    if modeRow.SetAutoAdjustHeight then modeRow:SetAutoAdjustHeight(false) end
+    modeRow:SetHeight(0)
+    container:AddChild(modeRow)
+
+    groupSlotsRow:AddChild(topGroup)
+
+    if groupSlotsRow.frame and topGroup.frame then
+        topGroup.frame:ClearAllPoints()
+        topGroup.frame:SetPoint("TOPLEFT", groupSlotsRow.frame, "TOPLEFT", 0, 0)
+        topGroup.frame:SetPoint("BOTTOMRIGHT", groupSlotsRow.frame, "BOTTOMRIGHT", 0, 0)
+    end
+
+    local modePad = AceGUI:Create("SimpleGroup")
+    modePad:SetFullWidth(true)
+    modePad:SetLayout("Flow")
+    if modePad.SetAutoAdjustHeight then modePad:SetAutoAdjustHeight(false) end
+    modePad:SetHeight(0)
+    container:AddChild(modePad)
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_modePad")
+    end
+
 
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
@@ -105,6 +182,10 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
     if nameEdit.DisableButton then nameEdit:DisableButton(true) end
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_nameEdit")
+    end
 
     if nameEdit.frame and topGroup.frame then
         nameEdit.frame:ClearAllPoints()
@@ -150,6 +231,20 @@ function Echoes:BuildGroupTab(container)
     self.UI.groupTemplateNameEdit = nameEdit
     self.UI.groupTemplateDrop = templateDrop
 
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_templateDrop")
+    end
+
+    local function GroupTabSafeStep(label, fn)
+        local ok, err = pcall(fn)
+        if not ok then
+            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab error at " .. label .. ": " .. tostring(err))
+            end
+        end
+        return ok
+    end
+
     local function SetButtonEnabled(btn, enabled)
         if not btn then return end
         if btn.SetDisabled then btn:SetDisabled(not enabled) end
@@ -163,6 +258,10 @@ function Echoes:BuildGroupTab(container)
                 btn.text:SetTextColor(0.55, 0.55, 0.55, 1)
             end
         end
+    end
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_SetButtonEnabled")
     end
 
     local saveBtn
@@ -196,15 +295,27 @@ function Echoes:BuildGroupTab(container)
         SetButtonEnabled(deleteBtn, allowDelete)
     end
 
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_RefreshTemplateHeader_def")
+    end
+
     -- Forward declarations (used by template helpers below, populated later).
     local slotValues = {}
     local ALTBOT_INDEX
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_slotValues")
+    end
 
     local function NormalizeAltbotName(name)
         name = tostring(name or "")
         name = name:gsub("^%s+", ""):gsub("%s+$", "")
         if name == "" then return nil end
         return string.upper(name:sub(1, 1)) .. name:sub(2)
+    end
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_NormalizeAltbotName_def")
     end
 
     local function ClearEmptySlot(slot)
@@ -216,6 +327,8 @@ function Echoes:BuildGroupTab(container)
             slot.classDrop:SetValue(1) -- None
             slot.classDrop._EchoesSelectedValue = 1
             slot.classDrop._EchoesAltbotName = nil
+            slot.classDrop._EchoesAltbotClassText = nil
+            slot.classDrop._EchoesAltbotClassText = nil
             if slot.classDrop.dropdown then
                 slot.classDrop.dropdown._EchoesFilledClassFile = nil
             end
@@ -237,6 +350,10 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_ClearEmptySlot_def")
+    end
+
     local function LoadPreset(templateIndex)
         local idx = tonumber(templateIndex) or 1
 
@@ -247,18 +364,6 @@ function Echoes:BuildGroupTab(container)
             if type(template.groups) == "table" then return template.groups end
             if type(template[1]) == "table" then return template end
             return nil
-        end
-
-        -- Always clear empty slots first so loading is deterministic.
-        if self.UI and self.UI.groupSlots then
-            for g = 1, 5 do
-                for p = 1, 5 do
-                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
-                    if slot then
-                        ClearEmptySlot(slot)
-                    end
-                end
-            end
         end
 
         local tpl = EchoesDB.groupTemplates and EchoesDB.groupTemplates[idx]
@@ -272,6 +377,16 @@ function Echoes:BuildGroupTab(container)
         end
         if not slots or not self.UI or not self.UI.groupSlots then return end
 
+        -- Always clear empty slots first so loading is deterministic.
+        for g = 1, 5 do
+            for p = 1, 5 do
+                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                if slot then
+                    ClearEmptySlot(slot)
+                end
+            end
+        end
+
         -- Build a stable per-position plan for specs (used both for icon persistence and Set Talents later).
         self._EchoesPlannedTalentByPos = {}
         for g = 1, 5 do
@@ -279,8 +394,15 @@ function Echoes:BuildGroupTab(container)
             for p = 1, 5 do
                 local entry = slots[g] and slots[g][p]
                 if entry and type(entry) == "table" then
+                    local classText = tostring(entry.class or "")
+                    if classText == "Altbot" then
+                        local altClass = NormalizeAltbotClassText(entry.altClassText)
+                        if altClass and altClass ~= "" then
+                            classText = altClass
+                        end
+                    end
                     self._EchoesPlannedTalentByPos[g][p] = {
-                        classText = tostring(entry.class or ""),
+                        classText = classText,
                         specLabel = tostring(entry.specLabel or ""),
                     }
                 else
@@ -291,10 +413,11 @@ function Echoes:BuildGroupTab(container)
 
         for g = 1, 5 do
             for p = 1, 5 do
-                local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
-                if slot and not slot._EchoesMember and slot.classDrop and slot.classDrop.SetValue then
-                    local entry = slots[g] and slots[g][p]
-                    if entry and type(entry) == "table" then
+                if not (g == 1 and p == 5) then
+                    local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                    if slot and slot.classDrop and slot.classDrop.SetValue then
+                        local entry = slots[g] and slots[g][p]
+                        if entry and type(entry) == "table" then
                         local classText = tostring(entry.class or "None")
                         local desiredIndex = 1
                         for i, v in ipairs(slotValues) do
@@ -304,24 +427,43 @@ function Echoes:BuildGroupTab(container)
                             end
                         end
 
-                        slot.classDrop._EchoesSuppress = true
-                        slot.classDrop:SetList(slotValues)
-                        slot.classDrop:SetValue(desiredIndex)
-                        slot.classDrop._EchoesSelectedValue = desiredIndex
-                        if desiredIndex == ALTBOT_INDEX then
-                            slot.classDrop._EchoesAltbotName = NormalizeAltbotName(entry.altName)
+                        local altbotName = (desiredIndex == ALTBOT_INDEX) and NormalizeAltbotName(entry.altName) or nil
+                        local altbotClassText = (desiredIndex == ALTBOT_INDEX) and NormalizeAltbotClassText(entry.altClassText) or nil
+                        local specLabel = entry.specLabel and tostring(entry.specLabel) or nil
+
+                        if slot._EchoesMember then
+                            slot._EchoesSavedConfig = {
+                                valueIndex = desiredIndex,
+                                altbotName = altbotName,
+                                altbotClassText = altbotClassText,
+                                specLabel = specLabel,
+                            }
                         else
-                            slot.classDrop._EchoesAltbotName = nil
+                            slot.classDrop._EchoesSuppress = true
+                            slot.classDrop:SetList(slotValues)
+                            slot.classDrop:SetValue(desiredIndex)
+                            slot.classDrop._EchoesSelectedValue = desiredIndex
+                            if desiredIndex == ALTBOT_INDEX then
+                                slot.classDrop._EchoesAltbotName = altbotName
+                                slot.classDrop._EchoesAltbotClassText = altbotClassText
+                            else
+                                slot.classDrop._EchoesAltbotName = nil
+                                slot.classDrop._EchoesAltbotClassText = nil
+                            end
+                            if slot.classDrop.dropdown then
+                                slot.classDrop.dropdown._EchoesFilledClassFile = nil
+                            end
+                            slot.classDrop._EchoesSuppress = nil
                         end
-                        if slot.classDrop.dropdown then
-                            slot.classDrop.dropdown._EchoesFilledClassFile = nil
-                        end
-                        slot.classDrop._EchoesSuppress = nil
 
                         if slot.cycleBtn then
-                            local vals = GetCycleValuesForRightText(classText)
+                            local classForCycle = classText
+                            if classText == "Altbot" and altbotClassText and altbotClassText ~= "" then
+                                classForCycle = altbotClassText
+                            end
+                            local vals = GetCycleValuesForRightText(classForCycle)
                             slot.cycleBtn.values = { t_unpack(vals) }
-                            local want = entry.specLabel and tostring(entry.specLabel) or nil
+                            local want = specLabel
                             local chosen = 1
                             if want and want ~= "" then
                                 for i, it in ipairs(slot.cycleBtn.values) do
@@ -335,16 +477,92 @@ function Echoes:BuildGroupTab(container)
                             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
                         end
 
-                        if self.UI._GroupSlotApplyColor then
-                            self.UI._GroupSlotApplyColor(slot.classDrop, desiredIndex)
+                        if not slot._EchoesMember then
+                            if self.UI._GroupSlotApplyColor then
+                                self.UI._GroupSlotApplyColor(slot.classDrop, desiredIndex)
+                            end
+                            if slot.classDrop._EchoesUpdateNameButtonVisibility then
+                                slot.classDrop._EchoesUpdateNameButtonVisibility(desiredIndex)
+                            end
                         end
-                        if slot.classDrop._EchoesUpdateNameButtonVisibility then
-                            slot.classDrop._EchoesUpdateNameButtonVisibility(desiredIndex)
-                        end
+                    end
                     end
                 end
             end
         end
+
+        -- Always show the player in Group 1, Slot 5 (class-colored).
+        do
+            local slot = self.UI.groupSlots[1] and self.UI.groupSlots[1][5]
+            local classFile = (type(UnitClass) == "function") and select(2, UnitClass("player")) or nil
+            local playerName = (type(UnitName) == "function") and UnitName("player") or nil
+            local classText
+            if classFile then
+                local map = {
+                    PALADIN = "Paladin",
+                    DEATHKNIGHT = "Death Knight",
+                    WARRIOR = "Warrior",
+                    SHAMAN = "Shaman",
+                    HUNTER = "Hunter",
+                    DRUID = "Druid",
+                    ROGUE = "Rogue",
+                    PRIEST = "Priest",
+                    WARLOCK = "Warlock",
+                    MAGE = "Mage",
+                }
+                classText = map[classFile]
+            end
+
+            if slot and slot.classDrop then
+                local displayText = playerName or classText or "Player"
+                slot._EchoesMember = { isPlayer = true, name = playerName or "", classFile = classFile }
+
+                slot.classDrop._EchoesSuppress = true
+                slot.classDrop:SetList({ [1] = displayText })
+                slot.classDrop:SetValue(1)
+                slot.classDrop._EchoesSelectedValue = 1
+                slot.classDrop._EchoesAltbotName = nil
+                slot.classDrop._EchoesAltbotClassText = nil
+                if slot.classDrop.dropdown then
+                    slot.classDrop.dropdown._EchoesFilledClassFile = classFile
+                end
+                slot.classDrop._EchoesSuppress = nil
+
+                if slot.classDrop.text and slot.classDrop.text.SetTextColor and classFile then
+                    local colors = rawget(_G, "RAID_CLASS_COLORS")
+                    local c = colors and colors[classFile]
+                    if c then
+                        slot.classDrop.text:SetTextColor(c.r or 1, c.g or 1, c.b or 1, 1)
+                    end
+                end
+
+                if slot.classDrop.SetDisabled then slot.classDrop:SetDisabled(true) end
+                if slot.classDrop.dropdown and slot.classDrop.dropdown.EnableMouse then
+                    slot.classDrop.dropdown:EnableMouse(false)
+                end
+                if slot.classDrop.button then
+                    if slot.classDrop.button.Disable then slot.classDrop.button:Disable() end
+                end
+
+                if slot.cycleBtn and slot.cycleBtn.frame then
+                    if slot.cycleBtn.frame.Hide then slot.cycleBtn.frame:Hide() end
+                    if slot.cycleBtn.frame.EnableMouse then slot.cycleBtn.frame:EnableMouse(false) end
+                end
+
+                if classText then
+                    self._EchoesPlannedTalentByPos = self._EchoesPlannedTalentByPos or {}
+                    self._EchoesPlannedTalentByPos[1] = self._EchoesPlannedTalentByPos[1] or {}
+                    self._EchoesPlannedTalentByPos[1][5] = {
+                        classText = classText,
+                        specLabel = Echoes_GetPlayerSpecLabel and Echoes_GetPlayerSpecLabel(classFile) or "",
+                    }
+                end
+            end
+        end
+    end
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_LoadPreset_def")
     end
 
     local function SavePreset(templateIndex)
@@ -373,10 +591,12 @@ function Echoes:BuildGroupTab(container)
                 if slot then
                     if slot._EchoesMember and slot._EchoesMember.name and not slot._EchoesMember.isPlayer then
                         -- If you're currently grouped, treat roster members as Altbot-by-name.
+                        local classText = CLASSFILE_TO_DISPLAY[slot._EchoesMember.classFile or ""]
                         entry = {
                             class = "Altbot",
                             altName = tostring(slot._EchoesMember.name),
                             specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil,
+                            altClassText = classText,
                         }
                     elseif (not slot._EchoesMember) and slot.classDrop then
                         local dd = slot.classDrop
@@ -385,11 +605,13 @@ function Echoes:BuildGroupTab(container)
                         if classText ~= "None" then
                             local altName = dd._EchoesAltbotName
                             altName = NormalizeAltbotName(altName)
+                            local altClassText = dd._EchoesAltbotClassText
+                            altClassText = NormalizeAltbotClassText(altClassText)
 
                             local specLabel = slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel or nil
                             if specLabel == "None" then specLabel = nil end
 
-                            entry = { class = classText, altName = altName, specLabel = specLabel }
+                            entry = { class = classText, altName = altName, specLabel = specLabel, altClassText = altClassText }
                         end
                     end
                 end
@@ -401,80 +623,106 @@ function Echoes:BuildGroupTab(container)
         return true
     end
 
-    templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
-        if templateDrop._EchoesSuppress then return end
-
-        local prev = EchoesDB.groupTemplateIndex or 1
-        if value == NEW_PRESET_KEY then
-            -- Revert immediately; creation will select the new preset.
-            templateDrop._EchoesSuppress = true
-            templateDrop:SetValue(prev)
-            templateDrop._EchoesSuppress = nil
-
-            self:ShowNamePrompt({
-                title = "New Preset",
-                initialText = "",
-                onAccept = function(text)
-                    local name = tostring(text or "")
-                    name = name:gsub("^%s+", ""):gsub("%s+$", "")
-                    if name == "" then return end
-
-                    EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
-                    EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
-
-                    local newIndex = GetMaxTemplateIndex() + 1
-                    EchoesDB.groupTemplateIndex = newIndex
-                    EchoesDB.groupTemplateNames[newIndex] = name
-
-                    local vals = BuildTemplateValues()
-                    if templateDrop and templateDrop.SetList then
-                        templateDrop:SetList(vals)
-                    end
-                    templateDrop._EchoesSuppress = true
-                    templateDrop:SetValue(newIndex)
-                    templateDrop._EchoesSuppress = nil
-                    RefreshTemplateHeader(newIndex)
-                    EchoesDB.groupTemplates[newIndex] = EchoesDB.groupTemplates[newIndex] or { name = name, slots = {} }
-                    LoadPreset(newIndex)
-                end,
-            })
-            return
+    GroupTabSafeStep("templateDrop:SetCallback", function()
+        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_templateDrop_callback")
         end
 
-        EchoesDB.groupTemplateIndex = value
-        RefreshTemplateHeader(value)
-        LoadPreset(value)
-    end)
-    topGroup:AddChild(templateDrop)
-    SkinDropdown(templateDrop)
+        templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
+            if templateDrop._EchoesSuppress then return end
 
-    if templateDrop.frame and topGroup.frame and nameEdit.frame then
-        templateDrop.frame:ClearAllPoints()
-        templateDrop.frame:SetPoint("TOP", topGroup.frame, "TOP", 0, 0)
-        templateDrop.frame:SetPoint("BOTTOM", topGroup.frame, "BOTTOM", 0, 0)
-        templateDrop.frame:SetPoint("LEFT", nameEdit.frame, "RIGHT", 10, 0)
-        if templateDrop.frame.SetWidth then templateDrop.frame:SetWidth(240) end
+            local prev = EchoesDB.groupTemplateIndex or 1
+            if value == NEW_PRESET_KEY then
+                -- Revert immediately; creation will select the new preset.
+                templateDrop._EchoesSuppress = true
+                templateDrop:SetValue(prev)
+                templateDrop._EchoesSuppress = nil
+
+                self:ShowNamePrompt({
+                    title = "New Preset",
+                    initialText = "",
+                    onAccept = function(text)
+                        local name = tostring(text or "")
+                        name = name:gsub("^%s+", ""):gsub("%s+$", "")
+                        if name == "" then return end
+
+                        EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
+                        EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
+
+                        local newIndex = GetMaxTemplateIndex() + 1
+                        EchoesDB.groupTemplateIndex = newIndex
+                        EchoesDB.groupTemplateNames[newIndex] = name
+
+                        local vals = BuildTemplateValues()
+                        if templateDrop and templateDrop.SetList then
+                            templateDrop:SetList(vals)
+                        end
+                        templateDrop._EchoesSuppress = true
+                        templateDrop:SetValue(newIndex)
+                        templateDrop._EchoesSuppress = nil
+                        RefreshTemplateHeader(newIndex)
+                        EchoesDB.groupTemplates[newIndex] = EchoesDB.groupTemplates[newIndex] or { name = name, slots = {} }
+                        LoadPreset(newIndex)
+                    end,
+                })
+                return
+            end
+
+            EchoesDB.groupTemplateIndex = value
+            RefreshTemplateHeader(value)
+            LoadPreset(value)
+        end)
+    end)
+    GroupTabSafeStep("topGroup:AddChild(templateDrop)", function()
+        topGroup:AddChild(templateDrop)
+    end)
+    GroupTabSafeStep("SkinDropdown(templateDrop)", function()
+        SkinDropdown(templateDrop)
+    end)
+
+    GroupTabSafeStep("templateDrop frame layout", function()
+        if templateDrop.frame and topGroup.frame and nameEdit.frame then
+            templateDrop.frame:ClearAllPoints()
+            templateDrop.frame:SetPoint("TOP", topGroup.frame, "TOP", 0, 0)
+            templateDrop.frame:SetPoint("BOTTOM", topGroup.frame, "BOTTOM", 0, 0)
+            templateDrop.frame:SetPoint("LEFT", nameEdit.frame, "RIGHT", 10, 0)
+            if templateDrop.frame.SetWidth then templateDrop.frame:SetWidth(240) end
+        end
+    end)
+
+    GroupTabSafeStep("RefreshTemplateHeader", function()
+        RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
+    end)
+
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_refresh_header")
+    elseif UIErrorsFrame and UIErrorsFrame.AddMessage then
+        UIErrorsFrame:AddMessage("Echoes: GroupTab step=after_refresh_header")
     end
 
-    RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_saveBtn")
+    end
 
-    saveBtn = AceGUI:Create("Button")
-    saveBtn:SetText("Save")
-    saveBtn:SetHeight(INPUT_HEIGHT)
-    saveBtn:SetCallback("OnClick", function()
-        local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
-        if not SavePreset(idx) then return end
+    GroupTabSafeStep("saveBtn build", function()
+        saveBtn = AceGUI:Create("Button")
+        saveBtn:SetText("Save")
+        saveBtn:SetHeight(INPUT_HEIGHT)
+        saveBtn:SetCallback("OnClick", function()
+            local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
+            if not SavePreset(idx) then return end
 
-        local vals = BuildTemplateValues()
-        if templateDrop and templateDrop.SetList then
-            templateDrop:SetList(vals)
-        end
-        RefreshTemplateHeader(idx)
+            local vals = BuildTemplateValues()
+            if templateDrop and templateDrop.SetList then
+                templateDrop:SetList(vals)
+            end
+            RefreshTemplateHeader(idx)
 
-        Echoes_Print("Group setup saved.")
+            Echoes_Print("Group setup saved.")
+        end)
+        topGroup:AddChild(saveBtn)
+        SkinButton(saveBtn)
     end)
-    topGroup:AddChild(saveBtn)
-    SkinButton(saveBtn)
 
     if saveBtn.frame and topGroup.frame and templateDrop.frame then
         saveBtn.frame:ClearAllPoints()
@@ -484,38 +732,44 @@ function Echoes:BuildGroupTab(container)
         if saveBtn.frame.SetWidth then saveBtn.frame:SetWidth(88) end
     end
 
-    deleteBtn = AceGUI:Create("Button")
-    deleteBtn:SetText("Delete")
-    deleteBtn:SetHeight(INPUT_HEIGHT)
-    deleteBtn:SetCallback("OnClick", function()
-        local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
-        if idx <= PRESET_COUNT then return end
-        if EchoesDB.groupTemplates then
-            EchoesDB.groupTemplates[idx] = nil
-        end
-        if EchoesDB.groupTemplateNames then
-            EchoesDB.groupTemplateNames[idx] = nil
-        end
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_deleteBtn")
+    end
 
-        local newMax = GetMaxTemplateIndex()
-        if idx > newMax then
-            EchoesDB.groupTemplateIndex = Clamp(newMax, 1, newMax)
-        end
+    GroupTabSafeStep("deleteBtn build", function()
+        deleteBtn = AceGUI:Create("Button")
+        deleteBtn:SetText("Delete")
+        deleteBtn:SetHeight(INPUT_HEIGHT)
+        deleteBtn:SetCallback("OnClick", function()
+            local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
+            if idx <= PRESET_COUNT then return end
+            if EchoesDB.groupTemplates then
+                EchoesDB.groupTemplates[idx] = nil
+            end
+            if EchoesDB.groupTemplateNames then
+                EchoesDB.groupTemplateNames[idx] = nil
+            end
 
-        local vals = BuildTemplateValues()
-        if templateDrop and templateDrop.SetList then
-            templateDrop:SetList(vals)
-        end
-        if templateDrop and templateDrop._EchoesSuppress ~= true and templateDrop.SetValue then
-            templateDrop._EchoesSuppress = true
-            templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
-            templateDrop._EchoesSuppress = nil
-        end
-        RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
-        Echoes_Print("Group setup deleted.")
+            local newMax = GetMaxTemplateIndex()
+            if idx > newMax then
+                EchoesDB.groupTemplateIndex = Clamp(newMax, 1, newMax)
+            end
+
+            local vals = BuildTemplateValues()
+            if templateDrop and templateDrop.SetList then
+                templateDrop:SetList(vals)
+            end
+            if templateDrop and templateDrop._EchoesSuppress ~= true and templateDrop.SetValue then
+                templateDrop._EchoesSuppress = true
+                templateDrop:SetValue(EchoesDB.groupTemplateIndex or 1)
+                templateDrop._EchoesSuppress = nil
+            end
+            RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
+            Echoes_Print("Group setup deleted.")
+        end)
+        topGroup:AddChild(deleteBtn)
+        SkinButton(deleteBtn)
     end)
-    topGroup:AddChild(deleteBtn)
-    SkinButton(deleteBtn)
 
     if deleteBtn.frame and topGroup.frame and saveBtn.frame then
         deleteBtn.frame:ClearAllPoints()
@@ -543,6 +797,10 @@ function Echoes:BuildGroupTab(container)
     headerPadBottom:SetHeight(0)
     container:AddChild(headerPadBottom)
 
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_headerPadBottom")
+    end
+
     -- Group Slots panel
     -- Use SimpleGroup instead of InlineGroup to avoid InlineGroup's reserved title space and
     -- border/content anchoring quirks (which can cause children to appear outside the window).
@@ -557,17 +815,9 @@ function Echoes:BuildGroupTab(container)
     end
     container:AddChild(gridPanel)
 
-    local gridTitle = AceGUI:Create("Label")
-    gridTitle:SetText("Group Slots")
-    gridTitle:SetFullWidth(true)
-    gridTitle:SetHeight(16)
-    if gridTitle.label then
-        if gridTitle.label.SetTextColor then
-            gridTitle.label:SetTextColor(1.0, 0.82, 0.0, 1)
-        end
-        SetEchoesFont(gridTitle.label, 12, ECHOES_FONT_FLAGS)
+    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_gridPanel")
     end
-    gridPanel:AddChild(gridTitle)
 
     local gridGroup = AceGUI:Create("SimpleGroup")
     gridGroup:SetFullWidth(true)
@@ -591,6 +841,12 @@ function Echoes:BuildGroupTab(container)
     gridRow2:SetLayout("Flow")
     gridRow2:SetHeight(SLOT_GROUP_H)
     gridGroup:AddChild(gridRow2)
+
+    local gridBottomPad = AceGUI:Create("SimpleGroup")
+    gridBottomPad:SetFullWidth(true)
+    gridBottomPad:SetLayout("Flow")
+    gridBottomPad:SetHeight(20)
+    gridGroup:AddChild(gridBottomPad)
 
     -- Layout groups in a 3x2 grid (3 on first row, 2 on second row)
     local COLUMN_CONFIG = {
@@ -625,6 +881,34 @@ function Echoes:BuildGroupTab(container)
         ["Mage"] = "MAGE",
     }
 
+    local CLASSFILE_TO_DISPLAY = {
+        ["PALADIN"] = "Paladin",
+        ["DEATHKNIGHT"] = "Death Knight",
+        ["WARRIOR"] = "Warrior",
+        ["SHAMAN"] = "Shaman",
+        ["HUNTER"] = "Hunter",
+        ["DRUID"] = "Druid",
+        ["ROGUE"] = "Rogue",
+        ["PRIEST"] = "Priest",
+        ["WARLOCK"] = "Warlock",
+        ["MAGE"] = "Mage",
+    }
+
+    local function NormalizeAltbotClassText(text)
+        text = tostring(text or "")
+        text = text:gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then return nil end
+
+        if DISPLAY_TO_CLASSFILE[text] then return text end
+        local key = text:upper():gsub("%s+", "")
+        if key == "DEATHKNIGHT" then return "Death Knight" end
+        if CLASSFILE_TO_DISPLAY[key] then return CLASSFILE_TO_DISPLAY[key] end
+
+        return nil
+    end
+
+    local UpdatePrivateDropdownText
+
     local function ApplyGroupSlotSelectedTextColor(dropdownWidget, value)
         if not dropdownWidget or not dropdownWidget.text or not dropdownWidget.text.SetTextColor then return end
         if dropdownWidget.dropdown and dropdownWidget.dropdown._EchoesForceDisabledGrey then
@@ -643,6 +927,9 @@ function Echoes:BuildGroupTab(container)
             if dropdownWidget._EchoesAltbotName and dropdownWidget._EchoesAltbotName ~= "" and dropdownWidget.text.SetText then
                 dropdownWidget.text:SetText(dropdownWidget._EchoesAltbotName)
             end
+            if UpdatePrivateDropdownText then
+                UpdatePrivateDropdownText(dropdownWidget)
+            end
             return
         end
 
@@ -654,6 +941,22 @@ function Echoes:BuildGroupTab(container)
         else
             dropdownWidget.text:SetTextColor(0.90, 0.85, 0.70, 1)
         end
+        if UpdatePrivateDropdownText then
+            UpdatePrivateDropdownText(dropdownWidget)
+        end
+    end
+
+    UpdatePrivateDropdownText = function(dd)
+        if not dd or not dd.dropdown or not dd.dropdown._EchoesPrivateText or not dd.dropdown._EchoesPrivateText.SetText then return end
+        local valueIndex = dd._EchoesSelectedValue or dd.value or 1
+        local display = slotValues[valueIndex]
+        local displayText
+        if display == "Altbot" and dd._EchoesAltbotName and dd._EchoesAltbotName ~= "" then
+            displayText = dd._EchoesAltbotName
+        else
+            displayText = dd.text and dd.text.GetText and dd.text:GetText() or ""
+        end
+        dd.dropdown._EchoesPrivateText:SetText(tostring(displayText or ""))
     end
 
     -- Expose helpers for roster-driven updates.
@@ -681,6 +984,28 @@ function Echoes:BuildGroupTab(container)
         end
 
         self.UI.groupSlots[colIndex] = self.UI.groupSlots[colIndex] or {}
+
+        local groupLabel = AceGUI:Create("Label")
+        groupLabel:SetText("Group " .. tostring(colIndex))
+        groupLabel:SetFullWidth(true)
+        groupLabel:SetHeight(GROUP_LABEL_H)
+        if groupLabel.label then
+            if groupLabel.label.SetTextColor then
+                groupLabel.label:SetTextColor(0.85, 0.85, 0.85, 1)
+            end
+            if groupLabel.label.SetJustifyH then
+                groupLabel.label:SetJustifyH("CENTER")
+            end
+            SetEchoesFont(groupLabel.label, 10, ECHOES_FONT_FLAGS)
+        end
+        col:AddChild(groupLabel)
+
+        local groupLabelPad = AceGUI:Create("SimpleGroup")
+        groupLabelPad:SetFullWidth(true)
+        groupLabelPad:SetLayout("Fill")
+        if groupLabelPad.SetAutoAdjustHeight then groupLabelPad:SetAutoAdjustHeight(false) end
+        groupLabelPad:SetHeight(4)
+        col:AddChild(groupLabelPad)
 
         for rowIndex = 1, cfg.rows do
             local rowGroup = AceGUI:Create("SimpleGroup")
@@ -834,6 +1159,7 @@ function Echoes:BuildGroupTab(container)
 
                 if value ~= ALTBOT_INDEX then
                     widget._EchoesAltbotName = nil
+                    widget._EchoesAltbotClassText = nil
                 end
 
                 local text = slotValues[value]
@@ -864,7 +1190,7 @@ function Echoes:BuildGroupTab(container)
 
             nameBtn = AceGUI:Create("Button")
             nameBtn:SetText("Name")
-            nameBtn:SetWidth(80)
+            nameBtn:SetWidth(65)
             nameBtn:SetHeight(ROW_H)
             local function OnNameButtonClick()
                 if not ALTBOT_INDEX then return end
@@ -885,6 +1211,7 @@ function Echoes:BuildGroupTab(container)
                             dd:SetValue(ALTBOT_INDEX)
                             dd._EchoesSuppress = nil
                             ApplyGroupSlotSelectedTextColor(dd, ALTBOT_INDEX)
+                            UpdatePrivateDropdownText(dd)
                         end,
                     })
                 end)
@@ -934,10 +1261,15 @@ function Echoes:BuildGroupTab(container)
         if actionCol.titletext.Hide then actionCol.titletext:Hide() end
     end
     actionCol:SetLayout("List")
-    actionCol:SetRelativeWidth(0.325)
-    actionCol:SetHeight(SLOT_GROUP_H)
+    actionCol:SetWidth(240)
+    actionCol:SetHeight((4 * INPUT_HEIGHT) + 10)
     SkinInlineGroup(actionCol, { border = false, alpha = 0.28 })
-    gridRow2:AddChild(actionCol)
+    if actionCol.frame and gridPanel.frame then
+        actionCol.frame:SetParent(gridPanel.frame)
+        actionCol.frame:ClearAllPoints()
+        actionCol.frame:SetPoint("BOTTOMRIGHT", gridPanel.frame, "BOTTOMRIGHT", -8, 28)
+        actionCol.frame:Show()
+    end
 
     local inviteBtn = AceGUI:Create("Button")
     inviteBtn:SetText("Invite")
@@ -1062,7 +1394,7 @@ function Echoes:BuildGroupTab(container)
             return false
         end
 
-        local function SetSlotConfig(slot, valueIndex, specLabel, altbotName)
+        local function SetSlotConfig(slot, valueIndex, specLabel, altbotName, altbotClassText)
             if not slot or not slot.classDrop then return end
             if slot._EchoesMember then return end
             if (slot.cycleBtn and slot.cycleBtn._EchoesLocked) then return end
@@ -1072,8 +1404,10 @@ function Echoes:BuildGroupTab(container)
 
             if valueIndex ~= ALTBOT_INDEX then
                 dd._EchoesAltbotName = nil
+                dd._EchoesAltbotClassText = nil
             else
                 dd._EchoesAltbotName = NormalizeAltbotName(altbotName)
+                dd._EchoesAltbotClassText = NormalizeAltbotClassText(altbotClassText)
             end
 
             dd:SetValue(valueIndex)
@@ -1084,6 +1418,7 @@ function Echoes:BuildGroupTab(container)
             if self.UI and self.UI._GroupSlotApplyColor then
                 self.UI._GroupSlotApplyColor(dd, valueIndex)
             end
+            UpdatePrivateDropdownText(dd)
 
             if specLabel and specLabel ~= "" and slot.cycleBtn and slot.cycleBtn.values and slot.cycleBtn._EchoesCycleUpdate then
                 local desired = tostring(specLabel)
@@ -1100,13 +1435,14 @@ function Echoes:BuildGroupTab(container)
 
         local function ReadSlotConfig(slot)
             if not slot or not slot.classDrop then
-                return { valueIndex = 1, specLabel = "", altbotName = nil }
+                return { valueIndex = 1, specLabel = "", altbotName = nil, altbotClassText = nil }
             end
             local dd = slot.classDrop
             local valueIndex = dd._EchoesSelectedValue or dd.value or 1
             local specLabel = (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or ""
             local altbotName = dd._EchoesAltbotName
-            return { valueIndex = valueIndex, specLabel = specLabel, altbotName = altbotName }
+            local altbotClassText = dd._EchoesAltbotClassText
+            return { valueIndex = valueIndex, specLabel = specLabel, altbotName = altbotName, altbotClassText = altbotClassText }
         end
 
         local function SlotIsMovable(slot)
@@ -1135,7 +1471,7 @@ function Echoes:BuildGroupTab(container)
                 for p = 1, 5 do
                     local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
                     if SlotIsMovable(slot) and SlotHasConfiguredClass(slot) then
-                        SetSlotConfig(slot, 1, "", nil)
+                        SetSlotConfig(slot, 1, "", nil, nil)
                     end
                 end
             end
@@ -1149,7 +1485,7 @@ function Echoes:BuildGroupTab(container)
                         if not cfg then
                             return
                         end
-                        SetSlotConfig(slot, cfg.valueIndex, cfg.specLabel, cfg.altbotName)
+                        SetSlotConfig(slot, cfg.valueIndex, cfg.specLabel, cfg.altbotName, cfg.altbotClassText)
                         i = i + 1
                     end
                 end
@@ -1496,8 +1832,32 @@ function Echoes:BuildGroupTab(container)
     actionCol:AddChild(raidResetBtn)
     SkinButton(raidResetBtn)
 
-    self:UpdateGroupCreationFromRoster(true)
-    LoadPreset(EchoesDB.groupTemplateIndex or 1)
+    local function RefreshGroupView(force)
+        local inRaid = (type(GetNumRaidMembers) == "function") and ((GetNumRaidMembers() or 0) > 0)
+        local inParty = (not inRaid) and (type(GetNumPartyMembers) == "function") and ((GetNumPartyMembers() or 0) > 0)
+
+        if inRaid or inParty then
+            self:UpdateGroupCreationFromRoster(force == true)
+        else
+            LoadPreset(EchoesDB.groupTemplateIndex or 1)
+        end
+
+        if container and container.DoLayout then
+            container:DoLayout()
+        end
+    end
+
+    self._EchoesLoadGroupPreset = LoadPreset
+    self._EchoesRefreshGroupView = RefreshGroupView
+
+    RefreshGroupView(true)
+    if self.Print then
+        local childCount = container and container.children and #container.children or 0
+        self:Print("GroupTab built. children=" .. tostring(childCount))
+    elseif DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
+        local childCount = container and container.children and #container.children or 0
+        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab built. children=" .. tostring(childCount))
+    end
 end
 
 local function Echoes_GetGroupSlotIndexForClassFile(classFile)
@@ -1611,6 +1971,11 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
         SetEnabledForWidget(slot.nameBtn, true)
+
+        if slot.cycleBtn and slot.cycleBtn.frame then
+            if slot.cycleBtn.frame.Show then slot.cycleBtn.frame:Show() end
+            if slot.cycleBtn.frame.EnableMouse then slot.cycleBtn.frame:EnableMouse(true) end
+        end
 
         if slot.classDrop and slot.classDrop.button and slot.classDrop.button.EnableMouse then
             slot.classDrop.button:EnableMouse(true)
@@ -1743,6 +2108,14 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         if slot.cycleBtn then
             slot.cycleBtn._EchoesLocked = member.isPlayer and true or false
         end
+
+        if member.isPlayer and slot.cycleBtn and slot.cycleBtn.frame then
+            if slot.cycleBtn.frame.Hide then slot.cycleBtn.frame:Hide() end
+            if slot.cycleBtn.frame.EnableMouse then slot.cycleBtn.frame:EnableMouse(false) end
+        elseif slot.cycleBtn and slot.cycleBtn.frame then
+            if slot.cycleBtn.frame.Show then slot.cycleBtn.frame:Show() end
+            if slot.cycleBtn.frame.EnableMouse then slot.cycleBtn.frame:EnableMouse(true) end
+        end
     end
 
     local membersByGroup = {}
@@ -1751,6 +2124,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
     local nParty = (type(GetNumPartyMembers) == "function" and GetNumPartyMembers()) or 0
     local inParty = (not inRaid) and (nParty and nParty > 0)
+    local forceReset = (force == true)
 
     if inRaid then
         for i = 1, n do
@@ -1798,6 +2172,47 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         }
     end
 
+    -- Always show the player in Group 1, Slot 5 for UI purposes.
+    do
+        local playerMember
+        local playerGroup
+        local playerPos
+
+        for g, groupMembers in pairs(membersByGroup) do
+            for p, m in ipairs(groupMembers) do
+                if m and m.isPlayer then
+                    playerMember = m
+                    playerGroup = g
+                    playerPos = p
+                    break
+                end
+            end
+            if playerMember then break end
+        end
+
+        if not playerMember then
+            playerMember = {
+                unit = "player",
+                name = UnitName("player"),
+                classFile = select(2, UnitClass("player")),
+                isPlayer = true,
+            }
+        end
+
+        membersByGroup[1] = membersByGroup[1] or {}
+        local occupant = membersByGroup[1][5]
+        membersByGroup[1][5] = playerMember
+
+        if playerMember and playerGroup and playerPos and (playerGroup ~= 1 or playerPos ~= 5) then
+            membersByGroup[playerGroup] = membersByGroup[playerGroup] or {}
+            if occupant then
+                membersByGroup[playerGroup][playerPos] = occupant
+            else
+                membersByGroup[playerGroup][playerPos] = nil
+            end
+        end
+    end
+
     for group = 1, 5 do
         for pos = 1, 5 do
             local slot = self.UI.groupSlots[group] and self.UI.groupSlots[group][pos] or nil
@@ -1808,9 +2223,66 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                     member.pos = pos
                     FillSlot(slot, member)
                 else
-                    if force or slot._EchoesMember then
+                    if forceReset or slot._EchoesMember then
                         ResetSlot(slot)
                     end
+                end
+            end
+        end
+
+        -- Always force the player into Group 1, Slot 5 (no spec cycle button).
+        do
+            local slot = self.UI.groupSlots[1] and self.UI.groupSlots[1][5]
+            local classFile = (type(UnitClass) == "function") and select(2, UnitClass("player")) or nil
+            local playerName = (type(UnitName) == "function") and UnitName("player") or nil
+            local map = {
+                PALADIN = "Paladin",
+                DEATHKNIGHT = "Death Knight",
+                WARRIOR = "Warrior",
+                SHAMAN = "Shaman",
+                HUNTER = "Hunter",
+                DRUID = "Druid",
+                ROUGE = "Rogue",
+                ROGUE = "Rogue",
+                PRIEST = "Priest",
+                WARLOCK = "Warlock",
+                MAGE = "Mage",
+            }
+            local classText = classFile and map[classFile] or nil
+
+            if slot and slot.classDrop and classText then
+                local desiredIndex = 1
+                for i, v in ipairs(slotValues) do
+                    if v == classText then
+                        desiredIndex = i
+                        break
+                    end
+                end
+
+                slot._EchoesMember = { isPlayer = true, name = playerName or "", classFile = classFile }
+
+                slot.classDrop._EchoesSuppress = true
+                slot.classDrop:SetList({ [1] = playerName or classText })
+                slot.classDrop:SetValue(1)
+                slot.classDrop._EchoesSelectedValue = 1
+                slot.classDrop._EchoesAltbotName = nil
+                slot.classDrop._EchoesAltbotClassText = nil
+                if slot.classDrop.dropdown then
+                    slot.classDrop.dropdown._EchoesFilledClassFile = classFile
+                end
+                slot.classDrop._EchoesSuppress = nil
+
+                if slot.classDrop.SetDisabled then slot.classDrop:SetDisabled(true) end
+                if slot.classDrop.dropdown and slot.classDrop.dropdown.EnableMouse then
+                    slot.classDrop.dropdown:EnableMouse(false)
+                end
+                if slot.classDrop.button then
+                    if slot.classDrop.button.Disable then slot.classDrop.button:Disable() end
+                end
+
+                if slot.cycleBtn and slot.cycleBtn.frame then
+                    if slot.cycleBtn.frame.Hide then slot.cycleBtn.frame:Hide() end
+                    if slot.cycleBtn.frame.EnableMouse then slot.cycleBtn.frame:EnableMouse(false) end
                 end
             end
         end
