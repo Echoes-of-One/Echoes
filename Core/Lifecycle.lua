@@ -1,11 +1,24 @@
 -- Core\Lifecycle.lua
 -- AceAddon lifecycle and event handlers.
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Lifecycle.lua executing")
+local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
+
+local function Echoes_FormatArgs(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        local v = select(i, ...)
+        if v ~= nil then
+            parts[#parts + 1] = tostring(v)
+        end
+    end
+    return table.concat(parts, ", ")
 end
 
-local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
+local function Echoes_Log(self, msg)
+    if self and self.Log then
+        self:Log("INFO", msg)
+    end
+end
 
 local function Echoes_SlashHandler(msg, editBox)
     local addon = _G.Echoes or Echoes
@@ -13,6 +26,9 @@ local function Echoes_SlashHandler(msg, editBox)
         local ok, err = pcall(addon.ChatCommand, addon, msg, editBox)
         if not ok and addon.Print then
             addon:Print("Slash error: " .. tostring(err))
+        end
+        if not ok and addon.Log then
+            addon:Log("ERROR", "Slash error: " .. tostring(err))
         end
     end
 end
@@ -31,24 +47,20 @@ function Echoes:OnInitialize()
         self:EnsureDefaults()
     end
 
+    if self.Log then
+        self:Log("INFO", "Lifecycle: OnInitialize")
+    end
+
     self:RegisterChatCommand("echoes", Echoes_SlashHandler)
     self:RegisterChatCommand("ech",    Echoes_SlashHandler)
 end
 
 function Echoes:OnEnable()
+    if self.Log then
+        self:Log("INFO", "Lifecycle: OnEnable")
+    end
     if self.BuildMinimapButton then
         self:BuildMinimapButton()
-    end
-
-    do
-        local loaded = tostring(self._GroupTabLoaded)
-        local guid = tostring(self._EchoesGuid)
-        local gguid = tostring(self._GroupTabGuid)
-        if self.Print then
-            self:Print("GroupTab load status: loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
-        elseif DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab load status: loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
-        end
     end
 
     -- Prebuild the main window and last active tab so /echoes never opens to a blank page.
@@ -71,6 +83,27 @@ function Echoes:OnEnable()
     self:RegisterEvent("PARTY_MEMBERS_CHANGED", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("PLAYER_TALENT_UPDATE", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED", "OnEchoesRosterOrSpecChanged")
+
+    -- Additional debug events for full logging.
+    self:RegisterEvent("ADDON_LOADED", "OnEchoesDebugEvent")
+    self:RegisterEvent("PLAYER_LOGIN", "OnEchoesDebugEvent")
+    self:RegisterEvent("PLAYER_LOGOUT", "OnEchoesDebugEvent")
+    self:RegisterEvent("UI_ERROR_MESSAGE", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_SYSTEM", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_PARTY", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_PARTY_LEADER", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_RAID", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_RAID_LEADER", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_GUILD", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_WHISPER_INFORM", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_SAY", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_YELL", "OnEchoesDebugEvent")
+    self:RegisterEvent("CHAT_MSG_CHANNEL", "OnEchoesDebugEvent")
+    self:RegisterEvent("TRADE_ACCEPT_UPDATE", "OnEchoesDebugEvent")
+    self:RegisterEvent("TRADE_MONEY_CHANGED", "OnEchoesDebugEvent")
+    self:RegisterEvent("TRADE_PLAYER_ITEM_CHANGED", "OnEchoesDebugEvent")
+    self:RegisterEvent("BAG_UPDATE", "OnEchoesDebugEvent")
+    self:RegisterEvent("ITEM_LOCK_CHANGED", "OnEchoesDebugEvent")
 
     -- Bot "Hello!" whisper detection for invite verification.
     if _G.EchoesDB and _G.EchoesDB.botSpamFilterEnabled then
@@ -97,6 +130,10 @@ function Echoes:ProcessWhisperMessage(msg, author)
 
     author = NormalizeName(author)
     if author == "" then return false end
+
+    if self.Log then
+        self:Log("INFO", "Whisper recv from=" .. tostring(author) .. " msg=" .. tostring(msg))
+    end
 
     if self.Inv_OnWhisper then
         self:Inv_OnWhisper(msg, author)
@@ -162,28 +199,43 @@ function Echoes:InstallChatMessageCleanup()
 end
 
 function Echoes:OnEchoesChatMsgWhisper(event, msg, author)
+    if self.Log then
+        self:Log("INFO", "Event: " .. tostring(event))
+    end
     self:ProcessWhisperMessage(msg, author)
 end
 
 function Echoes:OnEchoesTradeShow()
+    if self.Log then
+        self:Log("INFO", "Event: TRADE_SHOW")
+    end
     if self.Trade_OnShow then
         self:Trade_OnShow()
     end
 end
 
 function Echoes:OnEchoesTradeClosed()
+    if self.Log then
+        self:Log("INFO", "Event: TRADE_CLOSED")
+    end
     if self.Trade_OnClosed then
         self:Trade_OnClosed()
     end
 end
 
 function Echoes:OnEchoesTradeTargetItemChanged()
+    if self.Log then
+        self:Log("INFO", "Event: TRADE_TARGET_ITEM_CHANGED")
+    end
     if self.Trade_OnTargetItemChanged then
         self:Trade_OnTargetItemChanged()
     end
 end
 
 function Echoes:OnEchoesRosterOrSpecChanged()
+    if self.Log then
+        self:Log("INFO", "Event: roster/spec changed")
+    end
     if self.UpdateGroupCreationFromRoster then
         self:UpdateGroupCreationFromRoster(false)
     end
@@ -191,6 +243,16 @@ function Echoes:OnEchoesRosterOrSpecChanged()
     -- Keep Bot Inventories bar in sync as members join/leave.
     if self.Inv_RefreshMembers then
         self:Inv_RefreshMembers()
+    end
+end
+
+function Echoes:OnEchoesDebugEvent(event, ...)
+    if not self.Log then return end
+    local args = Echoes_FormatArgs(...)
+    if args ~= "" then
+        self:Log("INFO", "Event: " .. tostring(event) .. " args=" .. args)
+    else
+        self:Log("INFO", "Event: " .. tostring(event))
     end
 end
 

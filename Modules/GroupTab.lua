@@ -1,15 +1,8 @@
 -- Modules\GroupTab.lua
 -- Group Creation tab + roster-sync logic.
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab file executing (pre-LibStub)")
-end
-
 local LibStubRef = _G.LibStub
 if type(LibStubRef) ~= "function" and type(LibStubRef) ~= "table" then
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab aborted: LibStub missing")
-    end
     return
 end
 
@@ -18,13 +11,6 @@ if type(Echoes) ~= "table" then
     Echoes = {}
 end
 _G.Echoes = Echoes
-
--- Debug marker to confirm this file loads on the active addon instance.
-Echoes._GroupTabLoaded = true
-Echoes._GroupTabGuid = Echoes._EchoesGuid
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab loaded")
-end
 local AceGUI = LibStub("AceGUI-3.0")
 
 -- Lua compatibility: some environments provide `table.unpack` but not global `unpack`.
@@ -60,6 +46,12 @@ local Echoes_NormalizeName = Echoes.NormalizeName
 local Echoes_IsNameInGroup = Echoes.IsNameInGroup
 local Echoes_GetPlayerSpecLabel = Echoes.GetPlayerSpecLabel
 
+local function Echoes_Log(msg)
+    if Echoes and Echoes.Log then
+        Echoes:Log("INFO", msg)
+    end
+end
+
 ------------------------------------------------------------
 -- Group Creation tab (unchanged layout)
 ------------------------------------------------------------
@@ -69,6 +61,8 @@ function Echoes:BuildGroupTab(container)
     if self.EnsureDefaults then
         self:EnsureDefaults()
     end
+
+    Echoes_Log("GroupTab: build")
 
     -- Ensure shared lists/functions are initialized (load-order safety).
     GROUP_TEMPLATES = Echoes.GROUP_TEMPLATES or GROUP_TEMPLATES or { "10 Man", "25 Man" }
@@ -170,11 +164,6 @@ function Echoes:BuildGroupTab(container)
     modePad:SetHeight(0)
     container:AddChild(modePad)
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_modePad")
-    end
-
-
     local nameEdit = AceGUI:Create("EditBox")
     nameEdit:SetLabel("")
     nameEdit:SetText("")
@@ -182,10 +171,6 @@ function Echoes:BuildGroupTab(container)
     topGroup:AddChild(nameEdit)
     SkinEditBox(nameEdit)
     if nameEdit.DisableButton then nameEdit:DisableButton(true) end
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_nameEdit")
-    end
 
     if nameEdit.frame and topGroup.frame then
         nameEdit.frame:ClearAllPoints()
@@ -231,18 +216,12 @@ function Echoes:BuildGroupTab(container)
     self.UI.groupTemplateNameEdit = nameEdit
     self.UI.groupTemplateDrop = templateDrop
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_templateDrop")
-    end
-
     local function GroupTabSafeStep(label, fn)
         local ok, err = pcall(fn)
         if not ok then
-            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab error at " .. label .. ": " .. tostring(err))
-            end
+            Echoes_Log("GroupTab error at " .. tostring(label) .. ": " .. tostring(err))
         end
-        return ok
+        return ok, err
     end
 
     local function SetButtonEnabled(btn, enabled)
@@ -260,9 +239,6 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_SetButtonEnabled")
-    end
 
     local saveBtn
     local deleteBtn
@@ -295,17 +271,14 @@ function Echoes:BuildGroupTab(container)
         SetButtonEnabled(deleteBtn, allowDelete)
     end
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_RefreshTemplateHeader_def")
-    end
 
     -- Forward declarations (used by template helpers below, populated later).
     local slotValues = {}
     local ALTBOT_INDEX
+    local DISPLAY_TO_CLASSFILE
+    local CLASSFILE_TO_DISPLAY
+    local NormalizeAltbotClassText
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_slotValues")
-    end
 
     local function NormalizeAltbotName(name)
         name = tostring(name or "")
@@ -314,9 +287,6 @@ function Echoes:BuildGroupTab(container)
         return string.upper(name:sub(1, 1)) .. name:sub(2)
     end
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_NormalizeAltbotName_def")
-    end
 
     local function ClearEmptySlot(slot)
         if not slot or slot._EchoesMember then return end
@@ -348,10 +318,6 @@ function Echoes:BuildGroupTab(container)
             slot.cycleBtn._EchoesLocked = false
             if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
         end
-    end
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_ClearEmptySlot_def")
     end
 
     local function LoadPreset(templateIndex)
@@ -561,13 +527,14 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_LoadPreset_def")
-    end
-
     local function SavePreset(templateIndex)
         local idx = tonumber(templateIndex) or 1
-        if not self.UI or not self.UI.groupSlots then return false end
+        if not self.UI or not self.UI.groupSlots then
+            Echoes_Log("GroupTab: SavePreset failed (UI not ready)")
+            return false
+        end
+
+        Echoes_Log("GroupTab: SavePreset start idx=" .. tostring(idx))
 
         EchoesDB.groupTemplates = EchoesDB.groupTemplates or {}
         EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
@@ -583,6 +550,7 @@ function Echoes:BuildGroupTab(container)
         end
 
         local tpl = { name = newName or GetTemplateDisplayName(idx), slots = {} }
+        local entryCount = 0
         for g = 1, 5 do
             tpl.slots[g] = {}
             for p = 1, 5 do
@@ -615,21 +583,23 @@ function Echoes:BuildGroupTab(container)
                         end
                     end
                 end
+                if entry then
+                    entryCount = entryCount + 1
+                end
                 tpl.slots[g][p] = entry
             end
         end
 
         EchoesDB.groupTemplates[idx] = tpl
+        Echoes_Log("GroupTab: SavePreset done idx=" .. tostring(idx) .. " name=" .. tostring(tpl.name) .. " entries=" .. tostring(entryCount))
         return true
     end
 
     GroupTabSafeStep("templateDrop:SetCallback", function()
-        if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_templateDrop_callback")
-        end
-
         templateDrop:SetCallback("OnValueChanged", function(widget, event, value)
             if templateDrop._EchoesSuppress then return end
+
+            Echoes_Log("GroupTab: template selected value=" .. tostring(value))
 
             local prev = EchoesDB.groupTemplateIndex or 1
             if value == NEW_PRESET_KEY then
@@ -662,6 +632,7 @@ function Echoes:BuildGroupTab(container)
                         templateDrop._EchoesSuppress = nil
                         RefreshTemplateHeader(newIndex)
                         EchoesDB.groupTemplates[newIndex] = EchoesDB.groupTemplates[newIndex] or { name = name, slots = {} }
+                        Echoes_Log("GroupTab: new preset created index=" .. tostring(newIndex) .. " name=" .. tostring(name))
                         LoadPreset(newIndex)
                     end,
                 })
@@ -694,23 +665,16 @@ function Echoes:BuildGroupTab(container)
         RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
     end)
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_refresh_header")
-    elseif UIErrorsFrame and UIErrorsFrame.AddMessage then
-        UIErrorsFrame:AddMessage("Echoes: GroupTab step=after_refresh_header")
-    end
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_saveBtn")
-    end
-
     GroupTabSafeStep("saveBtn build", function()
         saveBtn = AceGUI:Create("Button")
+        saveBtn._EchoesLogId = "GroupTab.Save"
         saveBtn:SetText("Save")
         saveBtn:SetHeight(INPUT_HEIGHT)
         saveBtn:SetCallback("OnClick", function()
             local idx = tonumber(EchoesDB.groupTemplateIndex) or 1
             if not SavePreset(idx) then return end
+
+            Echoes_Log("GroupTab: preset saved index=" .. tostring(idx))
 
             local vals = BuildTemplateValues()
             if templateDrop and templateDrop.SetList then
@@ -732,12 +696,9 @@ function Echoes:BuildGroupTab(container)
         if saveBtn.frame.SetWidth then saveBtn.frame:SetWidth(88) end
     end
 
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=before_deleteBtn")
-    end
-
     GroupTabSafeStep("deleteBtn build", function()
         deleteBtn = AceGUI:Create("Button")
+        deleteBtn._EchoesLogId = "GroupTab.Delete"
         deleteBtn:SetText("Delete")
         deleteBtn:SetHeight(INPUT_HEIGHT)
         deleteBtn:SetCallback("OnClick", function()
@@ -766,6 +727,7 @@ function Echoes:BuildGroupTab(container)
             end
             RefreshTemplateHeader(EchoesDB.groupTemplateIndex or 1)
             Echoes_Print("Group setup deleted.")
+            Echoes_Log("GroupTab: preset deleted index=" .. tostring(idx))
         end)
         topGroup:AddChild(deleteBtn)
         SkinButton(deleteBtn)
@@ -796,11 +758,6 @@ function Echoes:BuildGroupTab(container)
     -- Keep this tight so the grid starts higher.
     headerPadBottom:SetHeight(0)
     container:AddChild(headerPadBottom)
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_headerPadBottom")
-    end
-
     -- Group Slots panel
     -- Use SimpleGroup instead of InlineGroup to avoid InlineGroup's reserved title space and
     -- border/content anchoring quirks (which can cause children to appear outside the window).
@@ -814,11 +771,6 @@ function Echoes:BuildGroupTab(container)
         gridPanel.frame:SetBackdropColor(0.06, 0.06, 0.06, 0.12)
     end
     container:AddChild(gridPanel)
-
-    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab step=after_gridPanel")
-    end
-
     local gridGroup = AceGUI:Create("SimpleGroup")
     gridGroup:SetFullWidth(true)
     gridGroup:SetLayout("List")
@@ -868,7 +820,7 @@ function Echoes:BuildGroupTab(container)
 
     self.UI._AltbotIndex = ALTBOT_INDEX
 
-    local DISPLAY_TO_CLASSFILE = {
+    DISPLAY_TO_CLASSFILE = {
         ["Paladin"] = "PALADIN",
         ["Death Knight"] = "DEATHKNIGHT",
         ["Warrior"] = "WARRIOR",
@@ -881,7 +833,7 @@ function Echoes:BuildGroupTab(container)
         ["Mage"] = "MAGE",
     }
 
-    local CLASSFILE_TO_DISPLAY = {
+    CLASSFILE_TO_DISPLAY = {
         ["PALADIN"] = "Paladin",
         ["DEATHKNIGHT"] = "Death Knight",
         ["WARRIOR"] = "Warrior",
@@ -894,7 +846,7 @@ function Echoes:BuildGroupTab(container)
         ["MAGE"] = "Mage",
     }
 
-    local function NormalizeAltbotClassText(text)
+    NormalizeAltbotClassText = function(text)
         text = tostring(text or "")
         text = text:gsub("^%s+", ""):gsub("%s+$", "")
         if text == "" then return nil end
@@ -1092,6 +1044,7 @@ function Echoes:BuildGroupTab(container)
                 local btn = widget
                 if btn._EchoesLocked then return end
                 if not btn.values or #btn.values == 0 then return end
+                Echoes_Log("GroupTab: cycle click button=" .. tostring(button))
                 if button == "RightButton" then
                     btn.index = btn.index - 1
                     if btn.index < 1 then btn.index = #btn.values end
@@ -1157,6 +1110,8 @@ function Echoes:BuildGroupTab(container)
                 if widget._EchoesSuppress then return end
                 widget._EchoesSelectedValue = value
 
+                Echoes_Log("GroupTab: slot class changed value=" .. tostring(value))
+
                 if value ~= ALTBOT_INDEX then
                     widget._EchoesAltbotName = nil
                     widget._EchoesAltbotClassText = nil
@@ -1199,6 +1154,8 @@ function Echoes:BuildGroupTab(container)
                     return
                 end
 
+                Echoes_Log("GroupTab: altbot name button clicked")
+
                 local initialText = (dd._EchoesAltbotName and tostring(dd._EchoesAltbotName)) or ""
                 local ok, err = pcall(function()
                     Echoes:ShowNamePrompt({
@@ -1218,6 +1175,7 @@ function Echoes:BuildGroupTab(container)
 
                 if not ok then
                     Echoes_Print("Name popup error: " .. tostring(err))
+                    Echoes_Log("GroupTab: name popup error: " .. tostring(err))
                 end
             end
 
@@ -1272,11 +1230,14 @@ function Echoes:BuildGroupTab(container)
     end
 
     local inviteBtn = AceGUI:Create("Button")
+    inviteBtn._EchoesLogId = "GroupTab.Invite"
     inviteBtn:SetText("Invite")
     inviteBtn:SetFullWidth(true)
 
     local function InviteClick()
         if not self.UI or not self.UI.groupSlots then return end
+
+        Echoes_Log("GroupTab: invite click")
 
         local function IsInRaidNow()
             return (type(GetNumRaidMembers) == "function") and ((GetNumRaidMembers() or 0) > 0)
@@ -1513,6 +1474,7 @@ function Echoes:BuildGroupTab(container)
 
         if maxGroupToInvite <= 0 then
             Echoes_Print("Nothing to invite.")
+            Echoes_Log("GroupTab: invite aborted (nothing to invite)")
             return
         end
 
@@ -1668,6 +1630,7 @@ function Echoes:BuildGroupTab(container)
 
         local function StartInviteRun()
             Echoes_Print("Inviting...")
+            Echoes_Log("GroupTab: inviting start actions=" .. tostring(#actions))
             self:RunActionQueue(actions, 0.70, function()
                 self:RunAfter(1.2, function()
                     local missing = {}
@@ -1704,6 +1667,7 @@ function Echoes:BuildGroupTab(container)
                     end
 
                     self._EchoesInviteSessionActive = false
+                    Echoes_Log("GroupTab: inviting complete missing=" .. tostring(#missing))
                 end)
             end)
         end
@@ -1723,10 +1687,13 @@ function Echoes:BuildGroupTab(container)
     SkinButton(inviteBtn)
 
     local talentsBtn = AceGUI:Create("Button")
+    talentsBtn._EchoesLogId = "GroupTab.SetTalents"
     talentsBtn:SetText("Set Talents")
     talentsBtn:SetFullWidth(true)
     talentsBtn:SetCallback("OnClick", function()
         if not self.UI or not self.UI.groupSlots then return end
+
+        Echoes_Log("GroupTab: set talents click")
 
         local function SpecLabelToTalentSpec(specLabel)
             local s = tostring(specLabel or "")
@@ -1796,25 +1763,30 @@ function Echoes:BuildGroupTab(container)
 
         if #actions == 0 then
             Echoes_Print("Set Talents: no bot members found in the roster slots.")
+            Echoes_Log("GroupTab: set talents aborted (no members)")
             return
         end
 
         Echoes_Print("Sending talent commands...")
+        Echoes_Log("GroupTab: set talents sending actions=" .. tostring(#actions))
         self:RunActionQueue(actions, 0.35)
     end)
     actionCol:AddChild(talentsBtn)
     SkinButton(talentsBtn)
 
     local maintBtn = AceGUI:Create("Button")
+    maintBtn._EchoesLogId = "GroupTab.Autogear"
     maintBtn:SetText("Autogear")
     maintBtn:SetFullWidth(true)
     maintBtn:SetCallback("OnClick", function()
+        Echoes_Log("GroupTab: autogear click")
         self:DoMaintenanceAutogear()
     end)
     actionCol:AddChild(maintBtn)
     SkinButton(maintBtn)
 
     local raidResetBtn = AceGUI:Create("Button")
+    raidResetBtn._EchoesLogId = "GroupTab.RaidReset"
     raidResetBtn:SetText("Raid Reset")
     raidResetBtn:SetFullWidth(true)
     raidResetBtn:SetCallback("OnClick", function()
@@ -1824,9 +1796,11 @@ function Echoes:BuildGroupTab(container)
 
         if not ch then
             Echoes_Print("Raid Reset: you are not in a party/raid.")
+            Echoes_Log("GroupTab: raid reset aborted (not in group)")
             return
         end
         if type(SendChatMessage) ~= "function" then return end
+        Echoes_Log("GroupTab: raid reset send channel=" .. tostring(ch))
         SendChatMessage("resetraids", ch)
     end)
     actionCol:AddChild(raidResetBtn)
@@ -1851,13 +1825,6 @@ function Echoes:BuildGroupTab(container)
     self._EchoesRefreshGroupView = RefreshGroupView
 
     RefreshGroupView(true)
-    if self.Print then
-        local childCount = container and container.children and #container.children or 0
-        self:Print("GroupTab built. children=" .. tostring(childCount))
-    elseif DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-        local childCount = container and container.children and #container.children or 0
-        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r GroupTab built. children=" .. tostring(childCount))
-    end
 end
 
 local function Echoes_GetGroupSlotIndexForClassFile(classFile)

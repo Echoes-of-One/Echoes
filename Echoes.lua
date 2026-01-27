@@ -728,18 +728,9 @@ local function SkinMainFrame(widget)
             self:SetBackdropColor(0.06, 0.06, 0.06, 0.9)
         end)
         sb:SetScript("OnClick", function()
-            if type(IsShiftKeyDown) == "function" and IsShiftKeyDown() then
-                if rawget(_G, "DEFAULT_CHAT_FRAME") and DEFAULT_CHAT_FRAME.AddMessage then
-                    DEFAULT_CHAT_FRAME:AddMessage("Echoes: Toggle Spec Panel clicked")
-                end
-            end
-
             local ok, err = pcall(function()
                 Echoes:ToggleSpecWhisperFrame(f)
             end)
-            if not ok and rawget(_G, "DEFAULT_CHAT_FRAME") and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage("Echoes: Spec Panel error: " .. tostring(err))
-            end
         end)
 
         f.EchoesSpecButton = sb

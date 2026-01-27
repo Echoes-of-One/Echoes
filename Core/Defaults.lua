@@ -1,16 +1,16 @@
 -- Core\Defaults.lua
 -- SavedVariables defaults and static config.
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Defaults.lua executing")
-end
-
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 
 _G.EchoesDB = _G.EchoesDB or {}
 
 function Echoes:EnsureDefaults()
     local EchoesDB = _G.EchoesDB
+
+    if self.Log then
+        self:Log("INFO", "Defaults: EnsureDefaults")
+    end
 
     local DEFAULT_UI_SCALE = 0.92
 

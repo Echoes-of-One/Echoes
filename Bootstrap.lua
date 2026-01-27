@@ -26,11 +26,4 @@ Echoes.UsePrivateDropdownTemplate = true
 -- Backwards-compatible globals.
 _G.Echoes = Echoes
 
--- Debug marker to detect multiple addon instances.
-Echoes._EchoesGuid = Echoes._EchoesGuid or tostring({})
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-	DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Bootstrap loaded (" .. tostring(Echoes._EchoesGuid) .. ")")
-elseif UIErrorsFrame and UIErrorsFrame.AddMessage then
-	UIErrorsFrame:AddMessage("Echoes: Bootstrap loaded")
-end

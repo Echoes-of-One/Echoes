@@ -1,14 +1,16 @@
 -- Core\Utils.lua
 -- Generic helpers, command mapping, timers/action queue, and shared data lists.
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Utils.lua executing")
-end
-
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 
 local function Echoes_Print(msg)
     DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r " .. tostring(msg))
+end
+
+local function Echoes_Log(msg, level)
+    if Echoes and Echoes.Log then
+        Echoes:Log(level or "INFO", msg)
+    end
 end
 
 local function Clamp(v, minv, maxv)
@@ -242,6 +244,8 @@ local function SendCmdKey(key)
         return
     end
 
+    Echoes_Log("Command key: " .. tostring(key) .. " -> " .. tostring(cmd))
+
     local EchoesDB = _G.EchoesDB
 
     if EchoesDB.sendAsChat then
@@ -256,6 +260,8 @@ function Echoes:RunAfter(delaySeconds, fn)
     if delaySeconds < 0 then delaySeconds = 0 end
 
     if type(fn) ~= "function" then return end
+
+    Echoes_Log("RunAfter scheduled delay=" .. tostring(delaySeconds))
 
     if not self._EchoesAfterFrame then
         local f = CreateFrame("Frame", nil, UIParent)
@@ -274,6 +280,7 @@ function Echoes:RunAfter(delaySeconds, fn)
                     local ok, err = pcall(item.fn)
                     if not ok then
                         Echoes_Print("Timer error: " .. tostring(err))
+                        Echoes_Log("RunAfter error: " .. tostring(err), "ERROR")
                     end
                 end
             end
@@ -331,6 +338,8 @@ function Echoes:RunActionQueue(actions, interval, onDone)
     interval = tonumber(interval) or 0.25
     if interval < 0.05 then interval = 0.05 end
 
+    Echoes_Log("ActionQueue start count=" .. tostring(#actions) .. " interval=" .. tostring(interval))
+
     self._EchoesActionQueue = actions
     self._EchoesActionInterval = interval
     self._EchoesActionElapsed = 0
@@ -357,6 +366,7 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                     Echoes._EchoesWaitHelloPlan = nil
                     Echoes._EchoesWaitHelloPostInviteTimeout = nil
                     Echoes._EchoesWaitHelloDeadline = nil
+                    Echoes_Log("ActionQueue: hello received")
                     return
                 end
 
@@ -365,6 +375,7 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                     Echoes._EchoesWaitHelloName = nil
                     Echoes._EchoesWaitHelloInvited = false
                     Echoes._EchoesWaitHelloDeadline = nil
+                    Echoes_Log("ActionQueue: hello timeout", "WARN")
                     return
                 end
 
@@ -380,9 +391,11 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                     local ok, err = pcall(cb)
                     if not ok then
                         Echoes_Print("ActionQueue onDone error: " .. tostring(err))
+                        Echoes_Log("ActionQueue onDone error: " .. tostring(err), "ERROR")
                     end
                 end
                 f:Hide()
+                Echoes_Log("ActionQueue complete")
                 return
             end
 
@@ -415,14 +428,17 @@ function Echoes:RunActionQueue(actions, interval, onDone)
             if not a then return end
 
             if a.kind == "invite" then
+                Echoes_Log("ActionQueue: invite name=" .. tostring(a.name))
                 if type(InviteUnit) == "function" and a.name and a.name ~= "" then
                     InviteUnit(a.name)
                 end
             elseif a.kind == "chat" then
+                Echoes_Log("ActionQueue: chat channel=" .. tostring(a.channel) .. " target=" .. tostring(a.target) .. " msg=" .. tostring(a.msg))
                 if type(SendChatMessage) == "function" and a.msg and a.msg ~= "" then
                     SendChatMessage(a.msg, a.channel or "PARTY", nil, a.target)
                 end
             elseif a.kind == "chat_wait_hello" then
+                Echoes_Log("ActionQueue: chat_wait_hello channel=" .. tostring(a.channel) .. " target=" .. tostring(a.target) .. " msg=" .. tostring(a.msg))
                 if type(SendChatMessage) == "function" and a.msg and a.msg ~= "" then
                     SendChatMessage(a.msg, a.channel or "PARTY", nil, a.target)
 
@@ -437,6 +453,7 @@ function Echoes:RunActionQueue(actions, interval, onDone)
                     Echoes._EchoesWaitHelloDeadline = now + timeout
                 end
             elseif a.kind == "kick" then
+                Echoes_Log("ActionQueue: kick name=" .. tostring(a.name))
                 if a.name and a.name ~= "" then
                     if type(SendChatMessage) == "function" then
                         SendChatMessage("logout", "WHISPER", nil, a.name)

@@ -43,6 +43,10 @@ end
 function Echoes:BuildMinimapButton()
     if MinimapBtn then return end
 
+    if self.Log then
+        self:Log("INFO", "Minimap: build button")
+    end
+
     local b = CreateFrame("Button", nil, Minimap)
     MinimapBtn = b
     b:SetSize(32, 32)
@@ -93,10 +97,16 @@ function Echoes:BuildMinimapButton()
 
     b:SetScript("OnClick", function(self, button)
         if type(IsControlKeyDown) == "function" and IsControlKeyDown() then
+            if Echoes.Log then
+                Echoes:Log("INFO", "Minimap: ctrl-click reset")
+            end
             Echoes:ResetMainWindowPosition()
             return
         end
         if button == "LeftButton" then
+            if Echoes.Log then
+                Echoes:Log("INFO", "Minimap: left-click toggle window")
+            end
             Echoes:ToggleMainWindow()
         end
     end)
@@ -108,6 +118,9 @@ function Echoes:BuildMinimapButton()
     b:SetScript("OnDragStop", function(self)
         self:SetScript("OnUpdate", nil)
         MinimapButton_UpdatePosition()
+        if Echoes.Log then
+            Echoes:Log("INFO", "Minimap: drag stop angle=" .. tostring((_G.EchoesDB and _G.EchoesDB.minimapAngle) or "?"))
+        end
     end)
 
     MinimapButton_UpdatePosition()

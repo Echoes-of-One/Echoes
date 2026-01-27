@@ -7,6 +7,12 @@ local SkinHeading = Echoes.SkinHeading
 local SkinLabel = Echoes.SkinLabel
 local SkinEditBox = Echoes.SkinEditBox
 
+local function Echoes_Log(msg)
+    if Echoes and Echoes.Log then
+        Echoes:Log("INFO", msg)
+    end
+end
+
 local function Echoes_GetMainWindowTopLeftOffsetsInUIParent()
     local widget = Echoes.UI and Echoes.UI.frame
     local f = widget and widget.frame
@@ -75,6 +81,8 @@ function Echoes:BuildEchoesTab(container)
     local EchoesDB = _G.EchoesDB
     container:SetLayout("List")
 
+    Echoes_Log("EchoesTab: build")
+
     local sliderTopPad = AceGUI:Create("SimpleGroup")
     sliderTopPad:SetFullWidth(true)
     sliderTopPad:SetLayout("Fill")
@@ -107,6 +115,7 @@ function Echoes:BuildEchoesTab(container)
         local v = tonumber(value) or (EchoesDB.uiScale or 1.0)
         v = Clamp(v, 0.5, 2.0)
         Echoes._EchoesPendingUiScale = v
+        Echoes_Log("EchoesTab: scale slider change=" .. string.format("%.2f", v))
     end)
     scaleSlider:SetCallback("OnMouseUp", function(widget, event, value)
         local v = tonumber(value) or Echoes._EchoesPendingUiScale or (EchoesDB.uiScale or 1.0)
@@ -116,6 +125,7 @@ function Echoes:BuildEchoesTab(container)
         Echoes._EchoesPendingUiScale = nil
 
         Echoes:ApplyScale()
+        Echoes_Log("EchoesTab: scale applied=" .. string.format("%.2f", v))
     end)
     container:AddChild(scaleSlider)
 
@@ -193,6 +203,7 @@ function Echoes:BuildEchoesTab(container)
         y = y or 0
         Echoes_SetMainWindowTopLeftOffsetsInUIParent(x, y)
         UpdatePositionEdits()
+        Echoes_Log("EchoesTab: position set x=" .. tostring(x) .. " y=" .. tostring(y))
         if widget and widget.editbox and widget.editbox.ClearFocus then
             widget.editbox:ClearFocus()
         end
@@ -209,6 +220,7 @@ function Echoes:BuildEchoesTab(container)
         x = x or 0
         Echoes_SetMainWindowTopLeftOffsetsInUIParent(x, y)
         UpdatePositionEdits()
+        Echoes_Log("EchoesTab: position set x=" .. tostring(x) .. " y=" .. tostring(y))
         if widget and widget.editbox and widget.editbox.ClearFocus then
             widget.editbox:ClearFocus()
         end
@@ -229,6 +241,7 @@ function Echoes:BuildEchoesTab(container)
             scaleSlider:SetValue(v)
         end
         UpdateScaleEdit()
+        Echoes_Log("EchoesTab: scale set via edit=" .. string.format("%.2f", v))
         if widget and widget.editbox and widget.editbox.ClearFocus then
             widget.editbox:ClearFocus()
         end
@@ -291,6 +304,7 @@ function Echoes:BuildEchoesTab(container)
     tradeToggle:SetFullWidth(true)
     tradeToggle:SetCallback("OnValueChanged", function(widget, event, value)
         EchoesDB.tradeFeaturesEnabled = (value == true)
+        Echoes_Log("EchoesTab: trade features=" .. tostring(EchoesDB.tradeFeaturesEnabled))
         if not EchoesDB.tradeFeaturesEnabled then
             if Echoes and Echoes.Trade_OnClosed then
                 Echoes:Trade_OnClosed()
@@ -309,6 +323,7 @@ function Echoes:BuildEchoesTab(container)
     spamToggle:SetFullWidth(true)
     spamToggle:SetCallback("OnValueChanged", function(widget, event, value)
         EchoesDB.botSpamFilterEnabled = (value == true)
+        Echoes_Log("EchoesTab: bot spam filter=" .. tostring(EchoesDB.botSpamFilterEnabled))
     end)
     container:AddChild(spamToggle)
 

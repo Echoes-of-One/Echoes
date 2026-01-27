@@ -1,10 +1,6 @@
 -- Core\MainWindow.lua
 -- Main window creation, tabs, sizing/scale, and slash command handling.
 
-if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-    DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow.lua executing")
-end
-
 local Echoes = LibStub("AceAddon-3.0"):GetAddon("Echoes")
 local AceGUI = LibStub("AceGUI-3.0")
 
@@ -37,8 +33,6 @@ local function Echoes_AttemptGroupTabBridge(self)
     local g = _G.Echoes
     if type(g) == "table" and type(g.BuildGroupTab) == "function" then
         self.BuildGroupTab = g.BuildGroupTab
-        self._GroupTabLoaded = g._GroupTabLoaded or self._GroupTabLoaded
-        self._GroupTabGuid = g._GroupTabGuid or self._GroupTabGuid
     end
 end
 
@@ -225,6 +219,10 @@ function Echoes:ApplyScale()
         f:SetScale(EchoesDB.uiScale or 1.0)
     end
 
+    if self.Log then
+        self:Log("INFO", "ApplyScale: uiScale=" .. tostring(EchoesDB.uiScale or 1.0))
+    end
+
     -- After any scale change, recenter like /echoes reset.
     self:ResetMainWindowPosition()
 end
@@ -235,6 +233,10 @@ end
 function Echoes:SetActiveTab(key)
     local EchoesDB = _G.EchoesDB
     EchoesDB.lastPanel = key or "BOT"
+
+    if self.Log then
+        self:Log("INFO", "SetActiveTab: " .. tostring(key))
+    end
 
     for tabKey, btn in pairs(self.UI.tabs) do
         if btn and btn.text then
@@ -264,6 +266,9 @@ function Echoes:SetActiveTab(key)
                 DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r Group tab error: " .. self._EchoesLastGroupError)
             end
         end
+        if self.Log then
+            self:Log("ERROR", "Group tab error: " .. self._EchoesLastGroupError)
+        end
     end
 
     local page = self.UI.pages[key]
@@ -278,15 +283,9 @@ function Echoes:SetActiveTab(key)
         if key == "BOT" then
             self:BuildBotTab(page)
         elseif key == "GROUP" then
-            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: entering GROUP tab build")
-            end
             Echoes_AttemptGroupTabBridge(self)
             if not self.BuildGroupTab then
-                local loaded = tostring(self._GroupTabLoaded)
-                local guid = tostring(self._EchoesGuid)
-                local gguid = tostring(self._GroupTabGuid)
-                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded). loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
+                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded).")
             else
                 local ok, err = xpcall(function()
                     self:BuildGroupTab(page)
@@ -300,10 +299,6 @@ function Echoes:SetActiveTab(key)
                     ShowGroupError(err)
                 else
                     page._EchoesGroupBuilt = true
-                    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                        local childCount = page and page.children and #page.children or 0
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: GROUP built children=" .. tostring(childCount))
-                    end
                 end
             end
         else
@@ -326,15 +321,9 @@ function Echoes:SetActiveTab(key)
         end
 
         if key == "GROUP" and page and (not page._EchoesGroupBuilt or not page.children or #page.children == 0) then
-            if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: rebuilding GROUP tab")
-            end
             Echoes_AttemptGroupTabBridge(self)
             if not self.BuildGroupTab then
-                local loaded = tostring(self._GroupTabLoaded)
-                local guid = tostring(self._EchoesGuid)
-                local gguid = tostring(self._GroupTabGuid)
-                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded). loaded=" .. loaded .. " guid=" .. guid .. " gguid=" .. gguid)
+                ShowGroupError("BuildGroupTab is missing (GroupTab.lua not loaded).")
             else
                 local ok, err = xpcall(function()
                     self:BuildGroupTab(page)
@@ -348,10 +337,6 @@ function Echoes:SetActiveTab(key)
                     ShowGroupError(err)
                 else
                     page._EchoesGroupBuilt = true
-                    if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
-                        local childCount = page and page.children and #page.children or 0
-                        DEFAULT_CHAT_FRAME:AddMessage("|cffFFD100Echoes:|r MainWindow: GROUP rebuilt children=" .. tostring(childCount))
-                    end
                 end
             end
         end
@@ -428,6 +413,12 @@ function Echoes:SetActiveTab(key)
         if container.DoLayout then
             container:DoLayout()
         end
+    end
+end
+
+local function Echoes_Log(self, level, msg)
+    if self and self.Log then
+        self:Log(level, msg)
     end
 end
 
@@ -544,10 +535,12 @@ function Echoes:ToggleMainWindow()
         if widget and widget.Hide then
             widget:Hide()
         end
+        Echoes_Log(self, "INFO", "MainWindow: hide")
     else
         if widget and widget.Show then
             widget:Show()
         end
+        Echoes_Log(self, "INFO", "MainWindow: show")
         local active = (_G.EchoesDB and _G.EchoesDB.lastPanel) or "BOT"
         if active ~= "BOT" and active ~= "GROUP" and active ~= "ECHOES" then
             active = "BOT"
@@ -570,6 +563,114 @@ end
 local function Echoes_Trim(s)
     s = tostring(s or "")
     return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function Echoes_EnsureDebugLog(addon)
+    addon = addon or _G.Echoes
+    if not addon or addon.ToggleDebugLogWindow then
+        return addon
+    end
+
+    addon._DebugLogLines = addon._DebugLogLines or {}
+
+    local function AppendDebugLine(msg)
+        if type(msg) ~= "string" then
+            msg = tostring(msg)
+        end
+        local t = date and date("%H:%M:%S") or "--:--:--"
+        local line = "[" .. t .. "] " .. msg
+        local lines = addon._DebugLogLines
+        lines[#lines + 1] = line
+        if #lines > 500 then
+            table.remove(lines, 1)
+        end
+
+        local f = addon._EchoesDebugLogFrame
+        if f and f.messageFrame and f.messageFrame.AddMessage then
+            f.messageFrame:AddMessage(line)
+        end
+    end
+
+    if not addon.Debug then
+        function addon:Debug(msg)
+            AppendDebugLine(msg)
+        end
+    end
+
+    local function CreateDebugLogWindow()
+        if addon._EchoesDebugLogFrame then
+            return addon._EchoesDebugLogFrame
+        end
+
+        local f = CreateFrame("Frame", "EchoesDebugLogFrame", UIParent)
+        f:SetSize(560, 300)
+        f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        f:SetFrameStrata("DIALOG")
+        f:SetClampedToScreen(true)
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        if f.RegisterForDrag then f:RegisterForDrag("LeftButton") end
+        f:SetScript("OnDragStart", function(self)
+            if self.StartMoving then self:StartMoving() end
+        end)
+        f:SetScript("OnDragStop", function(self)
+            if self.StopMovingOrSizing then self:StopMovingOrSizing() end
+        end)
+        f:Hide()
+
+        f:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\Buttons\\WHITE8x8",
+            tile = false, tileSize = 0, edgeSize = 1,
+            insets = { left = 1, right = 1, top = 1, bottom = 1 },
+        })
+        f:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+        f:SetBackdropBorderColor(0, 0, 0, 1)
+
+        local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        title:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -8)
+        title:SetTextColor(0.95, 0.82, 0.25, 1)
+        title:SetText("Echoes Debug Log")
+
+        local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+        close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+
+        local mf = CreateFrame("ScrollingMessageFrame", nil, f)
+        mf:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -28)
+        mf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 10)
+        mf:SetFontObject(ChatFontNormal)
+        mf:SetJustifyH("LEFT")
+        mf:SetFading(false)
+        mf:SetMaxLines(500)
+        mf:EnableMouseWheel(true)
+        mf:SetScript("OnMouseWheel", function(self, delta)
+            if delta > 0 then
+                self:ScrollUp()
+            else
+                self:ScrollDown()
+            end
+        end)
+
+        f.messageFrame = mf
+
+        for _, line in ipairs(addon._DebugLogLines) do
+            mf:AddMessage(line)
+        end
+
+        addon._EchoesDebugLogFrame = f
+        return f
+    end
+
+    function addon:ToggleDebugLogWindow()
+        local f = CreateDebugLogWindow()
+        if f:IsShown() then
+            f:Hide()
+        else
+            f:Show()
+        end
+    end
+
+    return addon
 end
 
 function Echoes:ResetMainWindowPosition()
@@ -596,6 +697,7 @@ function Echoes:ResetMainWindowPosition()
         self:UpdateScaleEdit()
     end
     Echoes_Print("Window reset to center.")
+    Echoes_Log(self, "INFO", "MainWindow: reset position")
 end
 
 function Echoes:ChatCommand(input)
@@ -605,6 +707,8 @@ function Echoes:ChatCommand(input)
     local cmd = input:match("^(%S+)")
     cmd = cmd and cmd:lower() or ""
 
+    Echoes_Log(self, "INFO", "Slash /echoes " .. tostring(input))
+
     if cmd == "help" or cmd == "?" then
         Echoes_Print("Echoes commands:")
         Echoes_Print("  /echoes                 - Toggle the main window")
@@ -613,6 +717,7 @@ function Echoes:ChatCommand(input)
         Echoes_Print("  /echoes reset           - Reset window position")
         Echoes_Print("  /echoes spec            - Toggle spec whisper panel")
         Echoes_Print("  /echoes inv             - Run inventory scan")
+        Echoes_Print("  /echoes debug           - Toggle debug log window")
         return
     end
 
@@ -658,6 +763,16 @@ function Echoes:ChatCommand(input)
             self:RunInventoryScan()
         else
             Echoes_Print("inv: feature not loaded")
+        end
+        return
+    end
+
+    if cmd == "debug" then
+        local addon = Echoes_EnsureDebugLog((self and self) or _G.Echoes)
+        if addon and addon.ToggleDebugLogWindow then
+            addon:ToggleDebugLogWindow()
+        else
+            Echoes_Print("debug: log not available")
         end
         return
     end

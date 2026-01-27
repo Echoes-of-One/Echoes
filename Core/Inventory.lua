@@ -9,6 +9,12 @@ local SkinBackdrop = Echoes.SkinBackdrop
 local SetEchoesFont = Echoes.SetEchoesFont
 local ECHOES_FONT_FLAGS = Echoes.ECHOES_FONT_FLAGS
 
+local function Echoes_Log(msg)
+    if Echoes and Echoes.Log then
+        Echoes:Log("INFO", msg)
+    end
+end
+
 local CRATE_ITEM_FALLBACK_NAME = "Foror's Crate of Endless Resist Gear Storage"
 local CRATE_ICON_FALLBACK = "Interface\\Icons\\INV_Misc_QuestionMark"
 local CLASS_ICON_ATLAS = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
@@ -941,6 +947,8 @@ end
 function Echoes:Inv_RequestPlayerInventory(targetName)
     EnsureInvState(self)
 
+    Echoes_Log("Inventory: request player=" .. tostring(targetName))
+
     targetName = NormalizeName(targetName)
     if targetName == "" then return end
     if IsSelf(targetName) then return end
@@ -992,6 +1000,8 @@ end
 -- we just performed an action on a single item.
 function Echoes:Inv_RequeryPlayerInventory(targetName)
     EnsureInvState(self)
+
+    Echoes_Log("Inventory: requery player=" .. tostring(targetName))
 
     targetName = NormalizeName(targetName)
     if targetName == "" then return end
@@ -1072,6 +1082,8 @@ function Echoes:Inv_ShowPlayer(name)
 
     name = NormalizeName(name)
     if name == "" then return end
+
+    Echoes_Log("Inventory: show player=" .. tostring(name))
 
     local f = EnsurePlayerInvFrame(self)
     EnsureTopAnchoredFrame(f)
@@ -1928,6 +1940,7 @@ function Echoes:Inv_ToggleBar()
     local bar = EnsureInvBar(self)
     if bar and bar.IsShown and bar:IsShown() then
         if bar.Hide then bar:Hide() end
+        Echoes_Log("Inventory: bar hide")
         return
     end
 
@@ -1935,10 +1948,13 @@ function Echoes:Inv_ToggleBar()
     self.Inv.members = GetGroupMemberNames()
     RebuildInvBarButtons(self)
     if bar and bar.Show then bar:Show() end
+    Echoes_Log("Inventory: bar show members=" .. tostring(self.Inv and self.Inv.members and #self.Inv.members or 0))
 end
 
 function Echoes:Inv_OnWhisper(msg, author)
     EnsureInvState(self)
+
+    Echoes_Log("Inventory: whisper from=" .. tostring(author) .. " msg=" .. tostring(msg))
 
     if not self._EchoesInvSessionActive then return end
 
@@ -2139,6 +2155,8 @@ end
 
 function Echoes:RunInventoryScan()
     EnsureInvState(self)
+
+    Echoes_Log("Inventory: run scan")
 
     -- /echoes inv now only opens the bar; requesting inventory happens when a crate is clicked.
     self._EchoesInvSessionActive = false
