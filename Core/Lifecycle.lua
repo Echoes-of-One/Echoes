@@ -79,6 +79,7 @@ function Echoes:OnEnable()
 
     -- Keep Group Creation in sync with roster changes and player spec changes.
     self:RegisterEvent("PLAYER_ENTERING_WORLD", "OnEchoesRosterOrSpecChanged")
+    self:RegisterEvent("GROUP_ROSTER_UPDATE", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("RAID_ROSTER_UPDATE", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("PARTY_MEMBERS_CHANGED", "OnEchoesRosterOrSpecChanged")
     self:RegisterEvent("PLAYER_TALENT_UPDATE", "OnEchoesRosterOrSpecChanged")
@@ -237,7 +238,7 @@ function Echoes:OnEchoesRosterOrSpecChanged()
         self:Log("INFO", "Event: roster/spec changed")
     end
     if self.UpdateGroupCreationFromRoster then
-        self:UpdateGroupCreationFromRoster(false)
+        self:UpdateGroupCreationFromRoster(true)
     end
 
     -- Keep Bot Inventories bar in sync as members join/leave.

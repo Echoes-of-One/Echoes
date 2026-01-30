@@ -46,6 +46,7 @@ function Echoes:EnsureDefaults()
     -- Group Creation templates
     EchoesDB.groupTemplates     = EchoesDB.groupTemplates     or {}
     EchoesDB.groupTemplateNames = EchoesDB.groupTemplateNames or {}
+    EchoesDB.altbotData         = EchoesDB.altbotData         or {}
 
     -- Default built-in presets (only if user hasn't saved one already)
     -- 10 Man: leave Group 1 Slot 1 open for the player.

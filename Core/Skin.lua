@@ -935,8 +935,17 @@ local function SkinButton(widget)
         return nil
     end
 
+    local function GetButtonTextColor(self)
+        local c = (self and self._EchoesTextColor) or (widget and widget._EchoesTextColor)
+        if type(c) == "table" then
+            return c[1] or 0.90, c[2] or 0.85, c[3] or 0.70, c[4] or 1
+        end
+        return 0.90, 0.85, 0.70, 1
+    end
+
     local function ReapplyButtonFont(self)
         local size = tonumber(self and self._EchoesFontSize) or fontSize
+        local r, g, b, a = GetButtonTextColor(self)
 
         -- Reapply to *all* FontString regions (some templates show a different FontString on hover).
         if self and self.GetRegions then
@@ -944,7 +953,7 @@ local function SkinButton(widget)
             for _, r in ipairs(regs) do
                 if r and r.IsObjectType and r:IsObjectType("FontString") then
                     if r.SetTextColor then
-                        r:SetTextColor(0.90, 0.85, 0.70, 1)
+                        r:SetTextColor(r, g, b, a)
                     end
                     SetEchoesFont(r, size, ECHOES_FONT_FLAGS)
                 end
@@ -953,7 +962,7 @@ local function SkinButton(widget)
 
         local fs = (self and self.GetFontString and self:GetFontString()) or nil
         if fs and fs.SetTextColor then
-            fs:SetTextColor(0.90, 0.85, 0.70, 1)
+            fs:SetTextColor(r, g, b, a)
         end
         if fs then
             SetEchoesFont(fs, size, ECHOES_FONT_FLAGS)
@@ -961,7 +970,7 @@ local function SkinButton(widget)
 
         if widget.text then
             if widget.text.SetTextColor then
-                widget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+                widget.text:SetTextColor(r, g, b, a)
             end
             SetEchoesFont(widget.text, size, ECHOES_FONT_FLAGS)
         end
@@ -984,7 +993,8 @@ local function SkinButton(widget)
             SkinBackdrop(self, self._EchoesSkinAlpha or 0.7)
             local fs = self.GetFontString and self:GetFontString()
             if fs then
-                fs:SetTextColor(0.90, 0.85, 0.70, 1)
+                local r, g, b, a = GetButtonTextColor(self)
+                fs:SetTextColor(r, g, b, a)
                 SetEchoesFont(fs, tonumber(self._EchoesFontSize) or 10, ECHOES_FONT_FLAGS)
             end
 
@@ -1029,7 +1039,8 @@ local function SkinButton(widget)
     SkinBackdrop(f, 0.7)
 
     if widget.text and widget.text.SetTextColor then
-        widget.text:SetTextColor(0.90, 0.85, 0.70, 1)
+        local r, g, b, a = GetButtonTextColor(f)
+        widget.text:SetTextColor(r, g, b, a)
         SetEchoesFont(widget.text, fontSize, ECHOES_FONT_FLAGS)
     end
 
