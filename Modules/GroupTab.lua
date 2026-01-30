@@ -1019,6 +1019,8 @@ function Echoes:BuildGroupTab(container)
         end
     end
 
+    self.UI._UpdatePrivateDropdownText = UpdatePrivateDropdownText
+
     -- Expose helpers for roster-driven updates.
     self.UI._GroupSlotApplyColor = ApplyGroupSlotSelectedTextColor
     self.UI._GroupSlotSlotValues = slotValues
@@ -2283,7 +2285,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                 SetNameButtonVisible(slot, false)
                 AnchorSlotDropdown(slot, false)
             end
-            UpdatePrivateDropdownText(slot.classDrop)
+            local updateFn = (self.UI and self.UI._UpdatePrivateDropdownText) or UpdatePrivateDropdownText
+            if updateFn then updateFn(slot.classDrop) end
         end
 
         if slot.cycleBtn then
