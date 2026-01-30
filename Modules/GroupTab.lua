@@ -956,6 +956,7 @@ function Echoes:BuildGroupTab(container)
         end
 
         local display = slotValues[value]
+        Echoes_Log("GroupTab: ApplyGroupSlotSelectedTextColor value=" .. tostring(value) .. " display=" .. tostring(display))
         if display == "None" or not display then
             ApplyDropdownTextColor(dropdownWidget, 0.60, 0.60, 0.60, 1)
             return
@@ -1080,6 +1081,7 @@ function Echoes:BuildGroupTab(container)
                 local dd = slot.classDrop
                 local value = dd._EchoesSelectedValue or dd.value
                 local isAltbot = (value == ALTBOT_INDEX) or (dd._EchoesAltbotName and dd._EchoesAltbotName ~= "")
+                Echoes_Log("GroupTab: EnsureAltbotCycleValues value=" .. tostring(value) .. " isAltbot=" .. tostring(isAltbot))
                 if not isAltbot then return end
 
                 local classText
@@ -1094,11 +1096,31 @@ function Echoes:BuildGroupTab(container)
                 end
                 if not classText or classText == "" then return end
 
+                Echoes_Log("GroupTab: EnsureAltbotCycleValues classText=" .. tostring(classText))
+
+                -- Only rebuild cycle values when class actually changes or values are missing.
+                local lastClassText = slot.cycleBtn._EchoesCycleClassText
+                if lastClassText == classText and slot.cycleBtn.values and #slot.cycleBtn.values > 1 then
+                    return
+                end
+
                 dd._EchoesAltbotClassText = classText
                 local vals = GetCycleValuesForRightText(classText)
                 if slot.cycleBtn then
+                    local prevLabel = slot.cycleBtn._EchoesSpecLabel
                     slot.cycleBtn.values = { t_unpack(vals) }
-                    slot.cycleBtn.index = 1
+                    slot.cycleBtn._EchoesCycleClassText = classText
+
+                    local newIndex = 1
+                    if prevLabel and prevLabel ~= "" then
+                        for i, it in ipairs(slot.cycleBtn.values) do
+                            if type(it) == "table" and it.label == prevLabel then
+                                newIndex = i
+                                break
+                            end
+                        end
+                    end
+                    slot.cycleBtn.index = newIndex
                     if slot.cycleBtn._EchoesCycleUpdate then slot.cycleBtn._EchoesCycleUpdate(slot.cycleBtn) end
                 end
             end
@@ -1116,6 +1138,8 @@ function Echoes:BuildGroupTab(container)
                 local item = btn.values[btn.index]
                 local icon = (type(item) == "table") and item.icon or nil
                 local label = (type(item) == "table") and item.label or tostring(item or "")
+
+                Echoes_Log("GroupTab: CycleUpdate label=" .. tostring(label) .. " index=" .. tostring(btn.index) .. "/" .. tostring(n))
 
                 btn._EchoesSpecLabel = label
                 btn:SetText("")
@@ -1181,7 +1205,7 @@ function Echoes:BuildGroupTab(container)
                 if btn._EchoesSlot then
                     EnsureAltbotCycleValues(btn._EchoesSlot)
                 end
-                Echoes_Log("GroupTab: cycle click button=" .. tostring(button))
+                Echoes_Log("GroupTab: cycle click button=" .. tostring(button) .. " count=" .. tostring(#(btn.values or {})))
                 if button == "RightButton" then
                     btn.index = btn.index - 1
                     if btn.index < 1 then btn.index = #btn.values end
@@ -1210,7 +1234,12 @@ function Echoes:BuildGroupTab(container)
 
             local function UpdateNameButtonVisibility(selectedValue)
                 local value = selectedValue or dd._EchoesSelectedValue or dd.value
-                local showName = (value == ALTBOT_INDEX) or (dd._EchoesAltbotName and dd._EchoesAltbotName ~= "")
+                if value == 1 then
+                    dd._EchoesAltbotName = nil
+                    dd._EchoesAltbotClassText = nil
+                end
+                local showName = (value ~= 1) and ((value == ALTBOT_INDEX) or (dd._EchoesAltbotName and dd._EchoesAltbotName ~= ""))
+                Echoes_Log("GroupTab: UpdateNameButtonVisibility value=" .. tostring(value) .. " showName=" .. tostring(showName))
                 if nameBtn and nameBtn.frame then
                     if showName then
                         if nameBtn.frame.SetAlpha then nameBtn.frame:SetAlpha(1) end
@@ -1255,6 +1284,7 @@ function Echoes:BuildGroupTab(container)
                 end
 
                 local text = slotValues[value]
+                Echoes_Log("GroupTab: slot class changed text=" .. tostring(text))
                 local classForCycle = text
                 if value == ALTBOT_INDEX then
                     local resolved = ResolveAltbotClassText(widget._EchoesAltbotName, widget._EchoesAltbotClassText)
@@ -1610,7 +1640,7 @@ function Echoes:BuildGroupTab(container)
             end
         end
 
-        CompactInvitePlanToFront()
+        -- Preserve slot positions when inviting (do not auto-compact configured slots).
 
         local function GroupHasAnyConfigured(g)
             for p = 1, 5 do
@@ -2060,6 +2090,8 @@ end
 function Echoes:UpdateGroupCreationFromRoster(force)
     if not self.UI or not self.UI.groupSlots then return end
 
+    Echoes_Log("GroupTab: UpdateGroupCreationFromRoster force=" .. tostring(force))
+
     local applyColor = self.UI._GroupSlotApplyColor
     local colors = rawget(_G, "RAID_CLASS_COLORS")
 
@@ -2136,6 +2168,54 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
     end
 
+    local function SetInviteOnNameClick(slot, name)
+        if not slot or not slot.classDrop then return end
+        local dd = slot.classDrop
+        local host = dd.frame
+        if not host or type(CreateFrame) ~= "function" then return end
+
+        name = Echoes_NormalizeName(name)
+        slot._EchoesInviteClickName = (name ~= "" and name) or nil
+        Echoes_Log("GroupTab: SetInviteOnNameClick name=" .. tostring(name))
+
+        if not slot._EchoesInviteOverlay then
+            local overlay = CreateFrame("Button", nil, host)
+            overlay:SetAllPoints(host)
+            if host.GetFrameLevel and overlay.SetFrameLevel then
+                overlay:SetFrameLevel((host:GetFrameLevel() or 0) + 10)
+            end
+            overlay:RegisterForClicks("LeftButtonUp")
+            overlay:SetScript("OnClick", function()
+                local nm = slot and slot._EchoesInviteClickName
+                nm = Echoes_NormalizeName(nm)
+                Echoes_Log("GroupTab: invite name click nm=" .. tostring(nm))
+                if nm == "" then return end
+                if Echoes_IsNameInGroup and Echoes_IsNameInGroup(nm) then
+                    Echoes_Log("GroupTab: invite click ignored (already in group) nm=" .. tostring(nm))
+                    return
+                end
+                if type(InviteUnit) == "function" then
+                    InviteUnit(nm)
+                    Echoes_Log("GroupTab: InviteUnit called nm=" .. tostring(nm))
+                end
+            end)
+            slot._EchoesInviteOverlay = overlay
+            Echoes_Log("GroupTab: invite overlay created")
+        end
+
+        if slot._EchoesInviteOverlay then
+            if slot._EchoesInviteClickName then
+                slot._EchoesInviteOverlay:Show()
+                slot._EchoesInviteOverlay:EnableMouse(true)
+                Echoes_Log("GroupTab: invite overlay enabled")
+            else
+                slot._EchoesInviteOverlay:Hide()
+                slot._EchoesInviteOverlay:EnableMouse(false)
+                Echoes_Log("GroupTab: invite overlay disabled")
+            end
+        end
+    end
+
     local function AnchorSlotDropdown(slot, showRightButton)
         if not slot or not slot.classDrop or not slot.classDrop.frame then return end
         if not slot.cycleBtn or not slot.cycleBtn.frame then return end
@@ -2158,6 +2238,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
     local function ResetSlot(slot)
         if not slot then return end
+        Echoes_Log("GroupTab: ResetSlot")
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
         SetEnabledForWidget(slot.nameBtn, true)
@@ -2179,6 +2260,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
         slot._EchoesMember = nil
         SetNameButtonMode(slot, "name")
+        SetInviteOnNameClick(slot, nil)
 
         if slot.classDrop and slot.classDrop.SetList and slot.classDrop.SetValue then
             if slot.classDrop.dropdown then
@@ -2190,8 +2272,18 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                 slot.classDrop:SetList(baseList)
             end
             slot.classDrop:SetValue(1) -- None
+            slot.classDrop._EchoesSelectedValue = 1
+            slot.classDrop._EchoesAltbotName = nil
+            slot.classDrop._EchoesAltbotClassText = nil
             slot.classDrop._EchoesSuppress = nil
             if applyColor then applyColor(slot.classDrop, 1) end
+            if slot.classDrop._EchoesUpdateNameButtonVisibility then
+                slot.classDrop._EchoesUpdateNameButtonVisibility(1)
+            else
+                SetNameButtonVisible(slot, false)
+                AnchorSlotDropdown(slot, false)
+            end
+            UpdatePrivateDropdownText(slot.classDrop)
         end
 
         if slot.cycleBtn then
@@ -2204,6 +2296,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
     local function FillSlot(slot, member)
         if not slot or not member then return end
+        Echoes_Log("GroupTab: FillSlot member=" .. tostring(member.name or "") .. " isPlayer=" .. tostring(member.isPlayer))
 
         slot._EchoesMember = member
 
@@ -2250,8 +2343,10 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         AnchorSlotDropdown(slot, not member.isPlayer)
         if not member.isPlayer then
             SetNameButtonMode(slot, "kick", member)
+            SetInviteOnNameClick(slot, member.name)
         else
             SetNameButtonMode(slot, "name")
+            SetInviteOnNameClick(slot, nil)
         end
 
         if slot.cycleBtn then
@@ -2363,6 +2458,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
     local function ApplyTemplateEntryToSlot(slot, entry)
         if not slot or not slot.classDrop or not entry then return false end
 
+        Echoes_Log("GroupTab: ApplyTemplateEntryToSlot class=" .. tostring(entry.class) .. " altName=" .. tostring(entry.altName))
+
         slot._EchoesMember = nil
         SetEnabledForWidget(slot.cycleBtn, true)
         SetEnabledForDropdown(slot.classDrop, true)
@@ -2429,6 +2526,11 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         local showName = (classText == "Altbot") or (resolvedAltbotIndex and desiredIndex == resolvedAltbotIndex) or (slot.classDrop._EchoesAltbotName and slot.classDrop._EchoesAltbotName ~= "")
         SetNameButtonVisible(slot, showName and true or false)
         AnchorSlotDropdown(slot, showName and true or false)
+        if showName and altbotName and altbotName ~= "" then
+            SetInviteOnNameClick(slot, altbotName)
+        else
+            SetInviteOnNameClick(slot, nil)
+        end
         if slot.cycleBtn then
             local classForCycle = classText
             if classText == "Altbot" and altbotClassText and altbotClassText ~= "" then
@@ -2540,10 +2642,11 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             end
         end
     elseif inParty then
+        local playerName = GetRosterName("player", UnitName("player"))
         membersByGroup[1] = {
             {
                 unit = "player",
-                name = GetRosterName("player", UnitName("player")),
+                name = playerName,
                 classFile = GetRosterClassFile("player", select(2, UnitClass("player"))),
                 isPlayer = true,
             },
@@ -2553,7 +2656,8 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             local unit = "party" .. i
             local fixedName = GetRosterName(unit, UnitName(unit))
             local fixedClass = GetRosterClassFile(unit, select(2, UnitClass(unit)))
-            if fixedName then
+            local isPlayerUnit = (UnitIsUnit and UnitIsUnit(unit, "player")) or false
+            if fixedName and (not isPlayerUnit) and (not (playerName and fixedName == playerName)) then
                 membersByGroup[1][#membersByGroup[1] + 1] = {
                     unit = unit,
                     name = fixedName,
@@ -2579,6 +2683,19 @@ function Echoes:UpdateGroupCreationFromRoster(force)
 
     UpdateAltbotDataFromRoster(membersByGroup)
 
+    -- Core rule: never place the player in any roster slot (only Group 1 Slot 5 later).
+    for g = 1, 5 do
+        local list = membersByGroup[g]
+        if list then
+            for i = #list, 1, -1 do
+                local m = list[i]
+                if m and m.isPlayer then
+                    table.remove(list, i)
+                end
+            end
+        end
+    end
+
     -- Remap members into their profile group when the name matches.
     do
         local tplSlots = GetTemplateSlotsForIndex(EchoesDB.groupTemplateIndex or 1)
@@ -2599,6 +2716,26 @@ function Echoes:UpdateGroupCreationFromRoster(force)
             local function SlotHasTemplateEntry(group, pos)
                 local entry = tplSlots and tplSlots[group] and tplSlots[group][pos] or nil
                 return entry ~= nil
+            end
+
+            -- Also honor current UI-configured name slots (even if not saved to the template yet).
+            if self.UI and self.UI.groupSlots then
+                for g = 1, 5 do
+                    for p = 1, 5 do
+                        if not (g == 1 and p == 5) then
+                            local slot = self.UI.groupSlots[g] and self.UI.groupSlots[g][p]
+                            local dd = slot and slot.classDrop
+                            local name = dd and dd._EchoesAltbotName
+                            if name and name ~= "" then
+                                local key = NormalizeMemberKey(name)
+                                if key and not nameToSlot[key] then
+                                    local specLabel = (slot.cycleBtn and slot.cycleBtn._EchoesSpecLabel) or nil
+                                    nameToSlot[key] = { group = g, pos = p, entry = { specLabel = specLabel } }
+                                end
+                            end
+                        end
+                    end
+                end
             end
 
             local function FindOpenSlot(remap, group, allowTemplate)
@@ -2739,11 +2876,24 @@ function Echoes:UpdateGroupCreationFromRoster(force)
         end
     end
 
+
     local function IsKickMode(slot)
         if not slot or not slot.nameBtn or not slot.nameBtn.text or not slot.nameBtn.text.GetText then
             return false
         end
         return slot.nameBtn.text:GetText() == "Kick"
+    end
+
+    local occupiedNames = {}
+    for g = 1, 5 do
+        for _, m in ipairs(membersByGroup[g] or {}) do
+            if m and m.name then
+                local key = NormalizeMemberKey(m.name)
+                if key then
+                    occupiedNames[key] = true
+                end
+            end
+        end
     end
 
     for group = 1, 5 do
@@ -2758,7 +2908,7 @@ function Echoes:UpdateGroupCreationFromRoster(force)
                 else
                     local tplSlots = GetTemplateSlotsForIndex(EchoesDB.groupTemplateIndex or 1)
                     local entry = tplSlots and tplSlots[group] and tplSlots[group][pos] or nil
-                    if entry then
+                    if entry and (not (entry.altName and occupiedNames[NormalizeMemberKey(entry.altName)])) then
                         ApplyTemplateEntryToSlot(slot, entry)
                     else
                         if forceReset or slot._EchoesMember or IsKickMode(slot) then
